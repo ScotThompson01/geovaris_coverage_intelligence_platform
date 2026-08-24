@@ -1,69 +1,220 @@
-import Image from "next/image";
+import { sql } from "@/lib/db";
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
+type ScenarioRow = {
+  customer_name: string;
+  project_name: string;
+  site_name: string;
+  latitude: number;
+  longitude: number;
+  scenario_name: string;
+  frequency_mhz: number;
+  eirp_watts: number;
+  antenna_height_m: number;
+  receiver_threshold_dbm: number;
+  propagation_model: string;
+};
+
+export default async function Home() {
+  const rows = (await sql`
+    SELECT
+      c.name AS customer_name,
+      p.name AS project_name,
+      s.name AS site_name,
+      s.latitude,
+      s.longitude,
+      sc.name AS scenario_name,
+      sc.frequency_mhz,
+      sc.eirp_watts,
+      sc.antenna_height_m,
+      sc.receiver_threshold_dbm,
+      sc.propagation_model
+    FROM customers c
+    JOIN projects p
+      ON p.customer_id = c.id
+    JOIN sites s
+      ON s.project_id = p.id
+      AND s.customer_id = c.id
+    JOIN scenarios sc
+      ON sc.site_id = s.id
+      AND sc.customer_id = c.id
+    ORDER BY sc.created_at DESC
+    LIMIT 1;
+  `) as ScenarioRow[];
+
+  const scenario = rows[0];
+
+  if (!scenario) {
+    return (
+      <main className="min-h-screen bg-slate-50 p-8">
+        <div className="mx-auto max-w-6xl">
+          <h1 className="text-3xl font-semibold text-slate-900">
+            GeoVaris Coverage Intelligence
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+
+          <p className="mt-4 text-slate-600">
+            No project data was found.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
       </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto max-w-7xl px-6 py-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+                GeoVaris Coverage Intelligence
+              </h1>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Clean data. Confident results.
+              </p>
+            </div>
+
+            <div className="rounded-full bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700">
+              Development
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <section className="mb-8">
+          <p className="text-sm font-medium uppercase tracking-wide text-indigo-600">
+            Coverage Scenario
+          </p>
+
+          <h2 className="mt-2 text-3xl font-semibold text-slate-900">
+            {scenario.site_name}
+          </h2>
+
+          <p className="mt-2 text-slate-600">
+            {scenario.customer_name}
+            {" · "}
+            {scenario.project_name}
+            {" · "}
+            {scenario.scenario_name}
+          </p>
+        </section>
+
+        <section className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Frequency"
+            value={`${scenario.frequency_mhz} MHz`}
+          />
+
+          <MetricCard
+            label="EIRP"
+            value={`${scenario.eirp_watts.toLocaleString()} W`}
+          />
+
+          <MetricCard
+            label="Antenna Height"
+            value={`${scenario.antenna_height_m} m`}
+          />
+
+          <MetricCard
+            label="Receiver Threshold"
+            value={`${scenario.receiver_threshold_dbm} dBm`}
+          />
+        </section>
+
+        <section className="mt-8 grid gap-6 lg:grid-cols-3">
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Coverage Map
+                </h3>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Interactive RF coverage visualization will appear here.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex h-96 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50">
+              <div className="text-center">
+                <p className="font-medium text-slate-600">
+                  Map placeholder
+                </p>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  MapLibre integration is coming next
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Site Details
+            </h3>
+
+            <dl className="mt-6 space-y-5">
+              <DetailRow
+                label="Latitude"
+                value={scenario.latitude.toFixed(4)}
+              />
+
+              <DetailRow
+                label="Longitude"
+                value={scenario.longitude.toFixed(4)}
+              />
+
+              <DetailRow
+                label="Propagation Model"
+                value={scenario.propagation_model}
+              />
+
+              <DetailRow
+                label="Scenario"
+                value={scenario.scenario_name}
+              />
+
+              <DetailRow
+                label="Project"
+                value={scenario.project_name}
+              />
+            </dl>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+type MetricCardProps = {
+  label: string;
+  value: string;
+};
+
+function MetricCard({ label, value }: MetricCardProps) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+
+      <p className="mt-2 text-2xl font-semibold text-slate-900">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+type DetailRowProps = {
+  label: string;
+  value: string;
+};
+
+function DetailRow({ label, value }: DetailRowProps) {
+  return (
+    <div>
+      <dt className="text-sm text-slate-500">{label}</dt>
+
+      <dd className="mt-1 font-medium text-slate-900">{value}</dd>
     </div>
   );
 }
