@@ -163,6 +163,7 @@ export default async function Home() {
                 latitude={scenario.latitude}
                 longitude={scenario.longitude}
                 siteName={scenario.site_name}
+                scenarioId={scenario.scenario_id}
               />
             </div>
           </div>
