@@ -1,3 +1,4 @@
+import CoverageMap from "@/components/CoverageMap";
 import { sql } from "@/lib/db";
 
 type ScenarioRow = {
@@ -136,16 +137,12 @@ export default async function Home() {
               </div>
             </div>
 
-            <div className="mt-6 flex h-96 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50">
-              <div className="text-center">
-                <p className="font-medium text-slate-600">
-                  Map placeholder
-                </p>
-
-                <p className="mt-1 text-sm text-slate-400">
-                  MapLibre integration is coming next
-                </p>
-              </div>
+            <div className="mt-6 overflow-hidden rounded-lg border border-slate-200">
+              <CoverageMap
+                latitude={scenario.latitude}
+                longitude={scenario.longitude}
+                siteName={scenario.site_name}
+              />
             </div>
           </div>
 
