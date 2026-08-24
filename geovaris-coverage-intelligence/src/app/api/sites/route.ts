@@ -115,3 +115,38 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+export async function GET() {
+  try {
+    const sites = await sql`
+      SELECT
+        s.id,
+        s.name,
+        s.latitude,
+        s.longitude,
+        p.name AS project_name,
+        c.name AS customer_name
+      FROM sites s
+      JOIN projects p
+        ON p.id = s.project_id
+        AND p.customer_id = s.customer_id
+      JOIN customers c
+        ON c.id = s.customer_id
+      ORDER BY c.name, p.name, s.name;
+    `;
+
+    return NextResponse.json({
+      status: "ok",
+      sites,
+    });
+  } catch (error) {
+    console.error("Site lookup failed:", error);
+
+    return NextResponse.json(
+      {
+        status: "error",
+        error: "Unable to load sites.",
+      },
+      { status: 500 },
+    );
+  }
+}
