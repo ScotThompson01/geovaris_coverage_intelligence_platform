@@ -1,9 +1,11 @@
 import CoverageMap from "@/components/CoverageMap";
 import CreateScenarioForm from "@/components/CreateScenarioForm";
 import CreateSiteForm from "@/components/CreateSiteForm";
+import CreateCoverageRunButton from "@/components/CreateCoverageRunButton";
 import { sql } from "@/lib/db";
 
 type ScenarioRow = {
+  scenario_id: string;
   customer_name: string;
   project_name: string;
   site_name: string;
@@ -25,6 +27,7 @@ export default async function Home() {
       s.name AS site_name,
       s.latitude,
       s.longitude,
+      sc.id AS scenario_id,
       sc.name AS scenario_name,
       sc.frequency_mhz,
       sc.eirp_watts,
@@ -137,6 +140,12 @@ export default async function Home() {
           />
         </section>
 
+        <section className="mt-6">
+          <CreateCoverageRunButton
+            scenarioId={scenario.scenario_id}
+          />
+        </section>
+
         <section className="mt-8 grid gap-6 lg:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
             <div>
@@ -195,7 +204,7 @@ export default async function Home() {
         <section className="mt-8">
           <CreateSiteForm />
         </section>
-        
+
         <section className="mt-8">
           <CreateScenarioForm />
         </section>
