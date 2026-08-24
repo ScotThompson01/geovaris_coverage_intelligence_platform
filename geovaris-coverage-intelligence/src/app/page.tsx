@@ -1,4 +1,5 @@
 import CoverageMap from "@/components/CoverageMap";
+import CreateSiteForm from "@/components/CreateSiteForm";
 import { sql } from "@/lib/db";
 
 type ScenarioRow = {
@@ -40,21 +41,33 @@ export default async function Home() {
       AND sc.customer_id = c.id
     ORDER BY sc.created_at DESC
     LIMIT 1;
-  `) as ScenarioRow[];
+  `) as unknown as ScenarioRow[];
 
   const scenario = rows[0];
 
   if (!scenario) {
     return (
-      <main className="min-h-screen bg-slate-50 p-8">
-        <div className="mx-auto max-w-6xl">
-          <h1 className="text-3xl font-semibold text-slate-900">
-            GeoVaris Coverage Intelligence
-          </h1>
+      <main className="min-h-screen bg-slate-50">
+        <header className="border-b border-slate-200 bg-white">
+          <div className="mx-auto max-w-7xl px-6 py-5">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+              GeoVaris Coverage Intelligence
+            </h1>
 
-          <p className="mt-4 text-slate-600">
-            No project data was found.
+            <p className="mt-1 text-sm text-slate-500">
+              Clean data. Confident results.
+            </p>
+          </div>
+        </header>
+
+        <div className="mx-auto max-w-7xl px-6 py-8">
+          <p className="text-slate-600">
+            No coverage scenario data was found.
           </p>
+
+          <section className="mt-8">
+            <CreateSiteForm />
+          </section>
         </div>
       </main>
     );
@@ -125,16 +138,14 @@ export default async function Home() {
 
         <section className="mt-8 grid gap-6 lg:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">
-                  Coverage Map
-                </h3>
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">
+                Coverage Map
+              </h3>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  Interactive RF coverage visualization will appear here.
-                </p>
-              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                Interactive site and RF coverage visualization.
+              </p>
             </div>
 
             <div className="mt-6 overflow-hidden rounded-lg border border-slate-200">
@@ -179,6 +190,10 @@ export default async function Home() {
             </dl>
           </div>
         </section>
+
+        <section className="mt-8">
+          <CreateSiteForm />
+        </section>
       </div>
     </main>
   );
@@ -192,7 +207,9 @@ type MetricCardProps = {
 function MetricCard({ label, value }: MetricCardProps) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className="text-sm font-medium text-slate-500">
+        {label}
+      </p>
 
       <p className="mt-2 text-2xl font-semibold text-slate-900">
         {value}
@@ -209,9 +226,13 @@ type DetailRowProps = {
 function DetailRow({ label, value }: DetailRowProps) {
   return (
     <div>
-      <dt className="text-sm text-slate-500">{label}</dt>
+      <dt className="text-sm text-slate-500">
+        {label}
+      </dt>
 
-      <dd className="mt-1 font-medium text-slate-900">{value}</dd>
+      <dd className="mt-1 font-medium text-slate-900">
+        {value}
+      </dd>
     </div>
   );
 }
