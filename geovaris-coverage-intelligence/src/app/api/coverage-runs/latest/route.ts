@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
         cr.status,
         cr.estimated_coverage_radius_m,
         cr.coverage_area_sq_m,
+        cr.processing_time_seconds,
         cr.frequency_mhz,
         cr.eirp_watts,
         cr.antenna_height_m,
