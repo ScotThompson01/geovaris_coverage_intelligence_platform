@@ -23,11 +23,13 @@ export async function POST(request: NextRequest) {
     }
 
     /*
-     * Resolve all ownership and RF inputs on the server.
+     * Resolve ownership, RF inputs, site coordinates,
+     * and governed DEM lineage on the server.
      *
      * The browser supplies only the scenario ID.
      * customer_id and all run parameters are copied
-     * directly from the database.
+     * directly from the database so the coverage run
+     * becomes an immutable calculation snapshot.
      */
     const scenarios = await sql`
       SELECT
@@ -48,7 +50,15 @@ export async function POST(request: NextRequest) {
         sc.propagation_model,
 
         s.latitude AS site_latitude,
-        s.longitude AS site_longitude
+        s.longitude AS site_longitude,
+
+        s.ground_elevation_m,
+        s.ground_elevation_source,
+        s.ground_elevation_version,
+        s.ground_elevation_horizontal_crs,
+        s.ground_elevation_vertical_datum,
+        s.ground_elevation_units,
+        s.ground_elevation_resolution_m
 
       FROM scenarios sc
 
@@ -80,6 +90,7 @@ export async function POST(request: NextRequest) {
 
         site_latitude,
         site_longitude,
+        site_ground_elevation_m,
 
         frequency_mhz,
         eirp_watts,
@@ -94,7 +105,14 @@ export async function POST(request: NextRequest) {
         resolution_m,
 
         propagation_model,
-        propagation_model_version
+        propagation_model_version,
+
+        dem_source,
+        dem_version,
+        dem_horizontal_crs,
+        dem_vertical_datum,
+        dem_units,
+        dem_resolution_m
       )
       VALUES (
         ${scenario.customer_id},
@@ -103,6 +121,7 @@ export async function POST(request: NextRequest) {
 
         ${scenario.site_latitude},
         ${scenario.site_longitude},
+        ${scenario.ground_elevation_m},
 
         ${scenario.frequency_mhz},
         ${scenario.eirp_watts},
@@ -117,7 +136,14 @@ export async function POST(request: NextRequest) {
         ${scenario.resolution_m},
 
         ${scenario.propagation_model},
-        'dev-0.1'
+        'dev-0.1',
+
+        ${scenario.ground_elevation_source},
+        ${scenario.ground_elevation_version},
+        ${scenario.ground_elevation_horizontal_crs},
+        ${scenario.ground_elevation_vertical_datum},
+        ${scenario.ground_elevation_units},
+        ${scenario.ground_elevation_resolution_m}
       )
 
       RETURNING
@@ -125,16 +151,30 @@ export async function POST(request: NextRequest) {
         customer_id,
         scenario_id,
         status,
+
         site_latitude,
         site_longitude,
+        site_ground_elevation_m,
+
         frequency_mhz,
         eirp_watts,
+
         antenna_height_m,
         receiver_threshold_dbm,
+
         calculation_radius_m,
         resolution_m,
+
         propagation_model,
         propagation_model_version,
+
+        dem_source,
+        dem_version,
+        dem_horizontal_crs,
+        dem_vertical_datum,
+        dem_units,
+        dem_resolution_m,
+
         created_at;
     `;
 
