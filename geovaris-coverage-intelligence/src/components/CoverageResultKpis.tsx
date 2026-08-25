@@ -23,6 +23,7 @@ type CoverageRunResponse = {
 
 const METERS_PER_MILE = 1609.344;
 const SQUARE_METERS_PER_SQUARE_MILE = 2_589_988.110336;
+const POLL_INTERVAL_MS = 3000;
 
 export default function CoverageResultKpis({
   scenarioId,
@@ -34,15 +35,17 @@ export default function CoverageResultKpis({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    async function loadCoverageResult() {
-      setIsLoading(true);
-      setError("");
+    let isActive = true;
 
+    async function loadCoverageResult() {
       try {
         const response = await fetch(
           `/api/coverage-runs/latest?scenarioId=${encodeURIComponent(
             scenarioId,
           )}`,
+          {
+            cache: "no-store",
+          },
         );
 
         const data =
@@ -54,24 +57,40 @@ export default function CoverageResultKpis({
           );
         }
 
-        setCoverageRun(data.coverageRun);
+        if (isActive) {
+          setCoverageRun(data.coverageRun);
+          setError("");
+          setIsLoading(false);
+        }
       } catch (err) {
         console.error(
           "Coverage KPI lookup failed:",
           err,
         );
 
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load coverage result.",
-        );
-      } finally {
-        setIsLoading(false);
+        if (isActive) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load coverage result.",
+          );
+
+          setIsLoading(false);
+        }
       }
     }
 
     loadCoverageResult();
+
+    const intervalId = window.setInterval(
+      loadCoverageResult,
+      POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+    };
   }, [scenarioId]);
 
   if (isLoading) {
@@ -98,11 +117,12 @@ export default function CoverageResultKpis({
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <p className="text-sm font-medium text-slate-700">
-          No completed coverage result is available yet.
+          Waiting for a completed coverage result...
         </p>
 
         <p className="mt-1 text-sm text-slate-500">
-          Create and process a coverage run to display result metrics.
+          Coverage results will update automatically when processing
+          finishes.
         </p>
       </div>
     );
@@ -121,20 +141,24 @@ export default function CoverageResultKpis({
         SQUARE_METERS_PER_SQUARE_MILE;
 
   const processingTime =
-    coverageRun.processing_time_seconds === null
-      ? null
-      : coverageRun.processing_time_seconds;
+    coverageRun.processing_time_seconds;
 
   return (
     <div>
-      <div className="mb-4">
-        <p className="text-sm font-medium uppercase tracking-wide text-indigo-600">
-          Coverage Results
-        </p>
+      <div className="mb-4 flex items-end justify-between">
+        <div>
+          <p className="text-sm font-medium uppercase tracking-wide text-indigo-600">
+            Coverage Results
+          </p>
 
-        <h3 className="mt-1 text-xl font-semibold text-slate-900">
-          Latest Completed Run
-        </h3>
+          <h3 className="mt-1 text-xl font-semibold text-slate-900">
+            Latest Completed Run
+          </h3>
+        </div>
+
+        <p className="text-xs text-slate-400">
+          Auto-refreshing
+        </p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
