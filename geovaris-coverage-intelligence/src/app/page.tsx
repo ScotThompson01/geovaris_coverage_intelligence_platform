@@ -1,4 +1,5 @@
 import CoverageMap from "@/components/CoverageMap";
+import CoverageResultKpis from "@/components/CoverageResultKpis";
 import CreateScenarioForm from "@/components/CreateScenarioForm";
 import CreateSiteForm from "@/components/CreateSiteForm";
 import CreateCoverageRunButton from "@/components/CreateCoverageRunButton";
@@ -142,6 +143,12 @@ export default async function Home() {
 
         <section className="mt-6">
           <CreateCoverageRunButton
+            scenarioId={scenario.scenario_id}
+          />
+        </section>
+
+        <section className="mt-8">
+          <CoverageResultKpis
             scenarioId={scenario.scenario_id}
           />
         </section>
