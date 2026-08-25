@@ -19,6 +19,8 @@ type CoverageRunResponse = {
   } | null;
 };
 
+const POLL_INTERVAL_MS = 3000;
+
 export default function CoverageMap({
   latitude,
   longitude,
@@ -84,12 +86,19 @@ export default function CoverageMap({
       )
       .addTo(map);
 
-    map.once("load", async () => {
+    let lastRunId: string | null = null;
+    let isActive = true;
+    let intervalId: number | null = null;
+
+    async function loadCoverage() {
       try {
         const response = await fetch(
           `/api/coverage-runs/latest?scenarioId=${encodeURIComponent(
             scenarioId,
           )}`,
+          {
+            cache: "no-store",
+          },
         );
 
         const data =
@@ -98,10 +107,17 @@ export default function CoverageMap({
         if (
           !response.ok ||
           !data.coverageRun ||
-          !data.coverageRun.coverage_geometry
+          !data.coverageRun.coverage_geometry ||
+          !isActive
         ) {
           return;
         }
+
+        if (data.coverageRun.id === lastRunId) {
+          return;
+        }
+
+        lastRunId = data.coverageRun.id;
 
         const coverageFeature: GeoJSON.Feature = {
           type: "Feature",
@@ -112,30 +128,38 @@ export default function CoverageMap({
           },
         };
 
-        map.addSource("coverage-result", {
-          type: "geojson",
-          data: coverageFeature,
-        });
+        const existingSource = map.getSource(
+          "coverage-result",
+        ) as maplibregl.GeoJSONSource | undefined;
 
-        map.addLayer({
-          id: "coverage-fill",
-          type: "fill",
-          source: "coverage-result",
-          paint: {
-            "fill-color": "#7c3aed",
-            "fill-opacity": 0.35,
-          },
-        });
+        if (existingSource) {
+          existingSource.setData(coverageFeature);
+        } else {
+          map.addSource("coverage-result", {
+            type: "geojson",
+            data: coverageFeature,
+          });
 
-        map.addLayer({
-          id: "coverage-outline",
-          type: "line",
-          source: "coverage-result",
-          paint: {
-            "line-color": "#4c1d95",
-            "line-width": 3,
-          },
-        });
+          map.addLayer({
+            id: "coverage-fill",
+            type: "fill",
+            source: "coverage-result",
+            paint: {
+              "fill-color": "#7c3aed",
+              "fill-opacity": 0.35,
+            },
+          });
+
+          map.addLayer({
+            id: "coverage-outline",
+            type: "line",
+            source: "coverage-result",
+            paint: {
+              "line-color": "#4c1d95",
+              "line-width": 3,
+            },
+          });
+        }
 
         const bounds =
           new maplibregl.LngLatBounds();
@@ -180,13 +204,28 @@ export default function CoverageMap({
         }
       } catch (error) {
         console.error(
-          "Coverage map load failed:",
+          "Coverage map polling failed:",
           error,
         );
       }
+    }
+
+    map.once("load", () => {
+      loadCoverage();
+
+      intervalId = window.setInterval(
+        loadCoverage,
+        POLL_INTERVAL_MS,
+      );
     });
 
     return () => {
+      isActive = false;
+
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+
       marker.remove();
       map.remove();
     };
