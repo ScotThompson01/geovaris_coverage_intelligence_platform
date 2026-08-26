@@ -32,6 +32,76 @@ PROPAGATION_MODE_NAMES = {
 }
 
 
+ITM_WARNING_FLAGS = {
+    0x0001: "WARN__TX_TERMINAL_HEIGHT",
+    0x0002: "WARN__RX_TERMINAL_HEIGHT",
+    0x0004: "WARN__FREQUENCY",
+    0x0008: "WARN__PATH_DISTANCE_TOO_BIG_1",
+    0x0010: "WARN__PATH_DISTANCE_TOO_BIG_2",
+    0x0020: "WARN__PATH_DISTANCE_TOO_SMALL_1",
+    0x0040: "WARN__PATH_DISTANCE_TOO_SMALL_2",
+    0x0080: "WARN__TX_HORIZON_ANGLE",
+    0x0100: "WARN__RX_HORIZON_ANGLE",
+    0x0200: "WARN__TX_HORIZON_DISTANCE_1",
+    0x0400: "WARN__RX_HORIZON_DISTANCE_1",
+    0x0800: "WARN__TX_HORIZON_DISTANCE_2",
+    0x1000: "WARN__RX_HORIZON_DISTANCE_2",
+    0x2000: "WARN__EXTREME_VARIABILITIES",
+    0x4000: "WARN__SURFACE_REFRACTIVITY",
+}
+
+
+def decode_itm_warning_flags(
+    warning_flags: int,
+) -> tuple[str, ...]:
+    """Decode NTIA ITM warning bit flags.
+
+    ITM warnings are bitwise flags, so multiple warning conditions
+    may be present in one integer value.
+
+    Unknown bits are retained explicitly so warning information
+    is never silently discarded.
+    """
+
+    if warning_flags < 0:
+        raise ValueError(
+            "warning_flags must be zero or greater; "
+            f"got {warning_flags}."
+        )
+
+    if warning_flags == 0:
+        return ()
+
+    warnings: list[str] = []
+
+    known_mask = 0
+
+    for flag, warning_name in (
+        ITM_WARNING_FLAGS.items()
+    ):
+        known_mask |= flag
+
+        if warning_flags & flag:
+            warnings.append(
+                warning_name
+            )
+
+    unknown_bits = (
+        warning_flags
+        & ~known_mask
+    )
+
+    if unknown_bits:
+        warnings.append(
+            "UNKNOWN_ITM_WARNING_BITS_"
+            f"0x{unknown_bits:04X}"
+        )
+
+    return tuple(
+        warnings
+    )
+
+
 class ItmModel(
     PropagationModel
 ):
@@ -85,7 +155,10 @@ class ItmModel(
             )
         )
 
-        if native_result.return_code != 0:
+        if native_result.return_code not in (
+            0,
+            1,
+        ):
             raise RuntimeError(
                 "NTIA ITM calculation failed with "
                 f"return code "
@@ -104,15 +177,9 @@ class ItmModel(
             )
         )
 
-        warnings: tuple[str, ...] = ()
-
-        if native_result.warning_flags != 0:
-            warnings = (
-                (
-                    "NTIA ITM warning flags: "
-                    f"0x{native_result.warning_flags:04X}"
-                ),
-            )
+        warnings = decode_itm_warning_flags(
+            native_result.warning_flags
+        )
 
         assumptions = {
             "climate": int(
@@ -147,6 +214,9 @@ class ItmModel(
             ),
             "itm_warning_flags": (
                 native_result.warning_flags
+            ),
+            "itm_warning_names": (
+                warnings
             ),
             "free_space_loss_db": (
                 native_result
