@@ -9,3 +9,7 @@ venv/
 # Python tooling caches
 .pytest_cache/
 .mypy_cache/
+
+rf-engine/data/
+
+rf-engine/vendor/
