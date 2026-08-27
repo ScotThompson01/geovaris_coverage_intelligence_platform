@@ -20,6 +20,9 @@ type ScenarioResponse = {
   };
 };
 
+const FREE_SPACE_MODEL = "free_space_test";
+const NTIA_ITM_MODEL = "ntia_itm";
+
 export default function CreateScenarioForm() {
   const [sites, setSites] = useState<Site[]>([]);
 
@@ -42,13 +45,26 @@ export default function CreateScenarioForm() {
   const [resolutionM, setResolutionM] = useState("30");
 
   const [propagationModel, setPropagationModel] =
-    useState("free_space_test");
+    useState(FREE_SPACE_MODEL);
+
+  const [itmClimate, setItmClimate] = useState("");
+  const [itmPolarization, setItmPolarization] = useState("");
+  const [itmVariabilityMode, setItmVariabilityMode] = useState("");
+  const [itmSurfaceRefractivity, setItmSurfaceRefractivity] =
+    useState("");
+  const [itmDielectricConstant, setItmDielectricConstant] =
+    useState("");
+  const [itmConductivity, setItmConductivity] = useState("");
+  const [itmConfidence, setItmConfidence] = useState("");
+  const [itmReliability, setItmReliability] = useState("");
 
   const [isLoadingSites, setIsLoadingSites] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const isItm = propagationModel === NTIA_ITM_MODEL;
 
   useEffect(() => {
     async function loadSites() {
@@ -92,29 +108,64 @@ export default function CreateScenarioForm() {
       const calculationRadiusM =
         Number(calculationRadiusMiles) * 1609.344;
 
+      const payload: Record<string, unknown> = {
+        siteId,
+        name,
+
+        frequencyMhz: Number(frequencyMhz),
+        eirpWatts: Number(eirpWatts),
+
+        antennaHeightM,
+        antennaGainDbi: Number(antennaGainDbi),
+
+        receiverHeightM: Number(receiverHeightM),
+        receiverThresholdDbm: Number(receiverThresholdDbm),
+
+        calculationRadiusM,
+        resolutionM: Number(resolutionM),
+
+        propagationModel,
+      };
+
+      if (isItm) {
+        const requiredItmValues = [
+          itmClimate,
+          itmPolarization,
+          itmVariabilityMode,
+          itmSurfaceRefractivity,
+          itmDielectricConstant,
+          itmConductivity,
+          itmConfidence,
+          itmReliability,
+        ];
+
+        if (requiredItmValues.some((value) => value === "")) {
+          throw new Error(
+            "All NTIA ITM parameters are required for an ITM scenario.",
+          );
+        }
+
+        payload.itmClimate = Number(itmClimate);
+        payload.itmPolarization = Number(itmPolarization);
+        payload.itmVariabilityMode = Number(itmVariabilityMode);
+        payload.itmSurfaceRefractivity =
+          Number(itmSurfaceRefractivity);
+        payload.itmDielectricConstant =
+          Number(itmDielectricConstant);
+        payload.itmConductivitySPerM =
+          Number(itmConductivity);
+        payload.itmConfidence =
+          Number(itmConfidence);
+        payload.itmReliability =
+          Number(itmReliability);
+      }
+
       const response = await fetch("/api/scenarios", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          siteId,
-          name,
-
-          frequencyMhz: Number(frequencyMhz),
-          eirpWatts: Number(eirpWatts),
-
-          antennaHeightM,
-          antennaGainDbi: Number(antennaGainDbi),
-
-          receiverHeightM: Number(receiverHeightM),
-          receiverThresholdDbm: Number(receiverThresholdDbm),
-
-          calculationRadiusM,
-          resolutionM: Number(resolutionM),
-
-          propagationModel,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = (await response.json()) as ScenarioResponse;
@@ -149,7 +200,8 @@ export default function CreateScenarioForm() {
         </h3>
 
         <p className="mt-1 text-sm text-slate-500">
-          Define RF parameters for a site coverage analysis.
+          Define RF parameters and propagation assumptions for a site
+          coverage analysis.
         </p>
       </div>
 
@@ -293,16 +345,122 @@ export default function CreateScenarioForm() {
             }
             className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
           >
-            <option value="free_space_test">
+            <option value={FREE_SPACE_MODEL}>
               Free Space — Development Test
+            </option>
+
+            <option value={NTIA_ITM_MODEL}>
+              NTIA ITM 1.4
             </option>
           </select>
 
           <p className="mt-2 text-xs text-slate-500">
-            Free-space is currently available for development testing only.
-            Terrain-aware propagation models will be added separately.
+            Free-space remains a development baseline. NTIA ITM uses
+            terrain-aware propagation and explicit engineering
+            assumptions.
           </p>
         </div>
+
+        {isItm && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+            <div>
+              <h4 className="font-semibold text-slate-900">
+                NTIA ITM Parameters
+              </h4>
+
+              <p className="mt-1 text-xs text-slate-500">
+                These values affect the propagation result and are stored
+                with the scenario and each coverage run for
+                reproducibility.
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <SelectField
+                id="itm-climate"
+                label="Radio Climate"
+                value={itmClimate}
+                onChange={setItmClimate}
+                options={[
+                  ["", "Select climate"],
+                  ["1", "1 — Equatorial"],
+                  ["2", "2 — Continental Subtropical"],
+                  ["3", "3 — Maritime Subtropical"],
+                  ["4", "4 — Desert"],
+                  ["5", "5 — Continental Temperate"],
+                  ["6", "6 — Maritime Temperate Over Land"],
+                  ["7", "7 — Maritime Temperate Over Sea"],
+                ]}
+              />
+
+              <SelectField
+                id="itm-polarization"
+                label="Polarization"
+                value={itmPolarization}
+                onChange={setItmPolarization}
+                options={[
+                  ["", "Select polarization"],
+                  ["0", "Horizontal"],
+                  ["1", "Vertical"],
+                ]}
+              />
+
+              <SelectField
+                id="itm-variability"
+                label="Variability Mode"
+                value={itmVariabilityMode}
+                onChange={setItmVariabilityMode}
+                options={[
+                  ["", "Select variability mode"],
+                  ["0", "Single Message"],
+                  ["1", "Accidental"],
+                  ["2", "Mobile"],
+                  ["3", "Broadcast"],
+                ]}
+              />
+
+              <NumberField
+                id="itm-refractivity"
+                label="Surface Refractivity"
+                value={itmSurfaceRefractivity}
+                onChange={setItmSurfaceRefractivity}
+                unit="N-units"
+              />
+
+              <NumberField
+                id="itm-dielectric"
+                label="Ground Dielectric Constant"
+                value={itmDielectricConstant}
+                onChange={setItmDielectricConstant}
+                unit=""
+              />
+
+              <NumberField
+                id="itm-conductivity"
+                label="Ground Conductivity"
+                value={itmConductivity}
+                onChange={setItmConductivity}
+                unit="S/m"
+              />
+
+              <NumberField
+                id="itm-confidence"
+                label="Confidence"
+                value={itmConfidence}
+                onChange={setItmConfidence}
+                unit="0–1"
+              />
+
+              <NumberField
+                id="itm-reliability"
+                label="Reliability"
+                value={itmReliability}
+                onChange={setItmReliability}
+                unit="0–1"
+              />
+            </div>
+          </div>
+        )}
 
         {message && (
           <div className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">
@@ -369,10 +527,56 @@ function NumberField({
           className="min-w-0 flex-1 rounded-l-lg px-3 py-2 text-slate-900 outline-none"
         />
 
-        <span className="flex items-center border-l border-slate-300 bg-slate-50 px-3 text-sm text-slate-500">
-          {unit}
-        </span>
+        {unit && (
+          <span className="flex items-center border-l border-slate-300 bg-slate-50 px-3 text-sm text-slate-500">
+            {unit}
+          </span>
+        )}
       </div>
+    </div>
+  );
+}
+
+type SelectFieldProps = {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<[string, string]>;
+};
+
+function SelectField({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+}: SelectFieldProps) {
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        className="block text-sm font-medium text-slate-700"
+      >
+        {label}
+      </label>
+
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required
+        className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+      >
+        {options.map(([optionValue, optionLabel]) => (
+          <option
+            key={`${id}-${optionValue || "empty"}`}
+            value={optionValue}
+          >
+            {optionLabel}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

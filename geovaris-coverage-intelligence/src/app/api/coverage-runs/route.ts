@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { sql } from "@/lib/db";
 
+const FREE_SPACE_MODEL = "free_space_test";
+const NTIA_ITM_MODEL = "ntia_itm";
+
 type CreateCoverageRunRequest = {
   scenarioId?: string;
 };
@@ -24,7 +27,8 @@ export async function POST(request: NextRequest) {
 
     /*
      * Resolve ownership, RF inputs, site coordinates,
-     * and governed DEM lineage on the server.
+     * propagation assumptions, and governed DEM lineage
+     * on the server.
      *
      * The browser supplies only the scenario ID.
      * customer_id and all run parameters are copied
@@ -38,6 +42,7 @@ export async function POST(request: NextRequest) {
 
         sc.frequency_mhz,
         sc.eirp_watts,
+
         sc.antenna_height_m,
         sc.antenna_gain_dbi,
 
@@ -48,6 +53,15 @@ export async function POST(request: NextRequest) {
         sc.resolution_m,
 
         sc.propagation_model,
+
+        sc.itm_climate,
+        sc.itm_polarization,
+        sc.itm_variability_mode,
+        sc.itm_surface_refractivity,
+        sc.itm_dielectric_constant,
+        sc.itm_conductivity_s_per_m,
+        sc.itm_confidence,
+        sc.itm_reliability,
 
         s.latitude AS site_latitude,
         s.longitude AS site_longitude,
@@ -82,6 +96,53 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let propagationModelVersion: string;
+
+    if (
+      scenario.propagation_model === FREE_SPACE_MODEL
+    ) {
+      propagationModelVersion = "dev-0.1";
+    } else if (
+      scenario.propagation_model === NTIA_ITM_MODEL
+    ) {
+      propagationModelVersion = "1.4";
+
+      const requiredItmValues = [
+        scenario.itm_climate,
+        scenario.itm_polarization,
+        scenario.itm_variability_mode,
+        scenario.itm_surface_refractivity,
+        scenario.itm_dielectric_constant,
+        scenario.itm_conductivity_s_per_m,
+        scenario.itm_confidence,
+        scenario.itm_reliability,
+      ];
+
+      if (
+        requiredItmValues.some(
+          (value) =>
+            value === null ||
+            value === undefined,
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "NTIA ITM scenario is missing required propagation parameters.",
+          },
+          { status: 400 },
+        );
+      }
+    } else {
+      return NextResponse.json(
+        {
+          error:
+            "Scenario uses an unsupported propagation model.",
+        },
+        { status: 400 },
+      );
+    }
+
     const runs = await sql`
       INSERT INTO coverage_runs (
         customer_id,
@@ -106,6 +167,15 @@ export async function POST(request: NextRequest) {
 
         propagation_model,
         propagation_model_version,
+
+        itm_climate,
+        itm_polarization,
+        itm_variability_mode,
+        itm_surface_refractivity,
+        itm_dielectric_constant,
+        itm_conductivity_s_per_m,
+        itm_confidence,
+        itm_reliability,
 
         dem_source,
         dem_version,
@@ -136,7 +206,16 @@ export async function POST(request: NextRequest) {
         ${scenario.resolution_m},
 
         ${scenario.propagation_model},
-        'dev-0.1',
+        ${propagationModelVersion},
+
+        ${scenario.itm_climate},
+        ${scenario.itm_polarization},
+        ${scenario.itm_variability_mode},
+        ${scenario.itm_surface_refractivity},
+        ${scenario.itm_dielectric_constant},
+        ${scenario.itm_conductivity_s_per_m},
+        ${scenario.itm_confidence},
+        ${scenario.itm_reliability},
 
         ${scenario.ground_elevation_source},
         ${scenario.ground_elevation_version},
@@ -160,6 +239,9 @@ export async function POST(request: NextRequest) {
         eirp_watts,
 
         antenna_height_m,
+        antenna_gain_dbi,
+
+        receiver_height_m,
         receiver_threshold_dbm,
 
         calculation_radius_m,
@@ -167,6 +249,15 @@ export async function POST(request: NextRequest) {
 
         propagation_model,
         propagation_model_version,
+
+        itm_climate,
+        itm_polarization,
+        itm_variability_mode,
+        itm_surface_refractivity,
+        itm_dielectric_constant,
+        itm_conductivity_s_per_m,
+        itm_confidence,
+        itm_reliability,
 
         dem_source,
         dem_version,
