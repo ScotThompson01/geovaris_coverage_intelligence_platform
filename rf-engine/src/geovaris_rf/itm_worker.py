@@ -53,7 +53,9 @@ from geovaris_rf.itm_model import (
 from geovaris_rf.artifacts import (
     build_coverage_artifact_paths,
 )
-
+from geovaris_rf.storage import (
+    LocalCoverageStorage,
+)
 PROPAGATION_MODEL = "ntia_itm"
 MODEL_VERSION = "1.4"
 
@@ -780,7 +782,25 @@ def process_one_itm_run() -> bool:
                     geojson_path
                 )
             )
+            storage = (
+                LocalCoverageStorage()
+            )
 
+            coverage_raster_uri = (
+                storage.publish(
+                    local_path=raster_path,
+                    artifact_key=(
+                        artifacts.raster_key
+                    ),
+                )
+            )
+
+            storage.publish(
+                local_path=geojson_path,
+                artifact_key=(
+                    artifacts.geojson_key
+                ),
+            )
             processing_time_seconds = (
                 time.perf_counter()
                 - started
@@ -790,7 +810,7 @@ def process_one_itm_run() -> bool:
                 connection,
                 run_id=run_id,
                 coverage_raster_uri=(
-                    artifacts.raster_key
+                    coverage_raster_uri
                 ),
                 coverage_geometry=(
                     coverage_geometry
