@@ -5,6 +5,14 @@ import { sql } from "@/lib/db";
 const FREE_SPACE_MODEL = "free_space_test";
 const NTIA_ITM_MODEL = "ntia_itm";
 
+const P2108_CLUTTER_MODEL =
+  "ITU-R P.2108 Terrestrial Statistical Clutter";
+
+const P2108_CLUTTER_MODEL_VERSION =
+  "P.2108-1 (09/2021) §3.2";
+
+const P2108_CORRECTION_END = "receiver";
+
 type CreateCoverageRunRequest = {
   scenarioId?: string;
 };
@@ -21,19 +29,22 @@ export async function POST(request: NextRequest) {
         {
           error: "Scenario is required.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     /*
      * Resolve ownership, RF inputs, site coordinates,
-     * propagation assumptions, and governed DEM lineage
-     * on the server.
+     * propagation assumptions, clutter assumptions,
+     * and governed dataset lineage on the server.
      *
      * The browser supplies only the scenario ID.
-     * customer_id and all run parameters are copied
-     * directly from the database so the coverage run
-     * becomes an immutable calculation snapshot.
+     *
+     * customer_id and all calculation parameters are
+     * copied directly from the database so the coverage
+     * run becomes an immutable calculation snapshot.
      */
     const scenarios = await sql`
       SELECT
@@ -62,6 +73,13 @@ export async function POST(request: NextRequest) {
         sc.itm_conductivity_s_per_m,
         sc.itm_confidence,
         sc.itm_reliability,
+
+        sc.clutter_source,
+        sc.clutter_version,
+        sc.clutter_model,
+        sc.clutter_model_version,
+        sc.clutter_percentage_locations,
+        sc.clutter_correction_end,
 
         s.latitude AS site_latitude,
         s.longitude AS site_longitude,
@@ -92,20 +110,26 @@ export async function POST(request: NextRequest) {
         {
           error: "Scenario was not found.",
         },
-        { status: 404 },
+        {
+          status: 404,
+        },
       );
     }
 
     let propagationModelVersion: string;
 
     if (
-      scenario.propagation_model === FREE_SPACE_MODEL
+      scenario.propagation_model ===
+      FREE_SPACE_MODEL
     ) {
-      propagationModelVersion = "dev-0.1";
+      propagationModelVersion =
+        "dev-0.1";
     } else if (
-      scenario.propagation_model === NTIA_ITM_MODEL
+      scenario.propagation_model ===
+      NTIA_ITM_MODEL
     ) {
-      propagationModelVersion = "1.4";
+      propagationModelVersion =
+        "1.4";
 
       const requiredItmValues = [
         scenario.itm_climate,
@@ -130,7 +154,9 @@ export async function POST(request: NextRequest) {
             error:
               "NTIA ITM scenario is missing required propagation parameters.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
     } else {
@@ -139,8 +165,131 @@ export async function POST(request: NextRequest) {
           error:
             "Scenario uses an unsupported propagation model.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
+    }
+
+    const clutterValues = [
+      scenario.clutter_source,
+      scenario.clutter_version,
+      scenario.clutter_model,
+      scenario.clutter_model_version,
+      scenario.clutter_percentage_locations,
+      scenario.clutter_correction_end,
+    ];
+
+    const clutterRequested =
+      clutterValues.some(
+        (value) =>
+          value !== null &&
+          value !== undefined,
+      );
+
+    if (
+      clutterRequested &&
+      scenario.propagation_model !==
+        NTIA_ITM_MODEL
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Clutter modeling is currently supported only with NTIA ITM scenarios.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    if (clutterRequested) {
+      const clutterIsComplete =
+        clutterValues.every(
+          (value) =>
+            value !== null &&
+            value !== undefined,
+        );
+
+      if (!clutterIsComplete) {
+        return NextResponse.json(
+          {
+            error:
+              "Scenario has incomplete clutter dataset or model parameters.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        scenario.clutter_model !==
+        P2108_CLUTTER_MODEL
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Scenario uses an unsupported clutter model.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        scenario.clutter_model_version !==
+        P2108_CLUTTER_MODEL_VERSION
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Scenario uses an unsupported clutter model version.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      const clutterPercentageLocations =
+        Number(
+          scenario.clutter_percentage_locations,
+        );
+
+      if (
+        !Number.isFinite(
+          clutterPercentageLocations,
+        ) ||
+        clutterPercentageLocations <= 0 ||
+        clutterPercentageLocations >= 100
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Scenario clutter percentage of locations must be greater than 0 and less than 100.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        scenario.clutter_correction_end !==
+        P2108_CORRECTION_END
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Current GeoVaris coverage calculations support receiver-side P.2108 clutter correction only.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
     }
 
     const runs = await sql`
@@ -176,6 +325,13 @@ export async function POST(request: NextRequest) {
         itm_conductivity_s_per_m,
         itm_confidence,
         itm_reliability,
+
+        clutter_source,
+        clutter_version,
+        clutter_model,
+        clutter_model_version,
+        clutter_percentage_locations,
+        clutter_correction_end,
 
         dem_source,
         dem_version,
@@ -216,6 +372,13 @@ export async function POST(request: NextRequest) {
         ${scenario.itm_conductivity_s_per_m},
         ${scenario.itm_confidence},
         ${scenario.itm_reliability},
+
+        ${scenario.clutter_source},
+        ${scenario.clutter_version},
+        ${scenario.clutter_model},
+        ${scenario.clutter_model_version},
+        ${scenario.clutter_percentage_locations},
+        ${scenario.clutter_correction_end},
 
         ${scenario.ground_elevation_source},
         ${scenario.ground_elevation_version},
@@ -259,6 +422,13 @@ export async function POST(request: NextRequest) {
         itm_confidence,
         itm_reliability,
 
+        clutter_source,
+        clutter_version,
+        clutter_model,
+        clutter_model_version,
+        clutter_percentage_locations,
+        clutter_correction_end,
+
         dem_source,
         dem_version,
         dem_horizontal_crs,
@@ -272,9 +442,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         status: "ok",
-        coverageRun: runs[0],
+        coverageRun:
+          runs[0],
       },
-      { status: 201 },
+      {
+        status: 201,
+      },
     );
   } catch (error) {
     console.error(
@@ -284,9 +457,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "Unable to create coverage run.",
+        error:
+          "Unable to create coverage run.",
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }
