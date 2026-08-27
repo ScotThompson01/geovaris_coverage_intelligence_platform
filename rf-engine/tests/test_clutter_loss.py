@@ -119,7 +119,21 @@ class ClutterLossContractTests(
                 receiver_height_agl_m=2.0,
             )
 
-    def test_result_requires_nonnegative_loss(
+    def test_result_allows_negative_statistical_loss(
+        self,
+    ):
+        result = ClutterLossResult(
+            model_name="Test",
+            model_version="1.0",
+            clutter_loss_db=-0.5,
+        )
+
+        self.assertEqual(
+            result.clutter_loss_db,
+            -0.5,
+        )
+
+    def test_result_rejects_nonfinite_loss(
         self,
     ):
         with self.assertRaises(
@@ -128,9 +142,10 @@ class ClutterLossContractTests(
             ClutterLossResult(
                 model_name="Test",
                 model_version="1.0",
-                clutter_loss_db=-1.0,
+                clutter_loss_db=float(
+                    "nan"
+                ),
             )
-
     def test_model_returns_typed_result(
         self,
     ):
