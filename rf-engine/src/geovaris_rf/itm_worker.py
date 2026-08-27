@@ -50,7 +50,9 @@ from geovaris_rf.itm_model import (
     ItmModel,
     default_local_itm_dll_path,
 )
-
+from geovaris_rf.artifacts import (
+    build_coverage_artifact_paths,
+)
 
 PROPAGATION_MODEL = "ntia_itm"
 MODEL_VERSION = "1.4"
@@ -487,7 +489,7 @@ def complete_itm_run(
     connection: psycopg.Connection,
     *,
     run_id: Any,
-    raster_path: Path,
+    coverage_raster_uri: str,
     coverage_geometry: dict[str, Any],
     processing_time_seconds: float,
 ) -> None:
@@ -530,9 +532,7 @@ def complete_itm_run(
             WHERE id = %s;
             """,
             (
-                str(
-                    raster_path
-                ),
+                coverage_raster_uri,
                 geometry_json,
                 geometry_json,
                 processing_time_seconds,
@@ -738,26 +738,24 @@ def process_one_itm_run() -> bool:
                 )
             )
 
-            run_directory = (
-                output_root
-                / str(
-                    run_id
+            artifacts = (
+                build_coverage_artifact_paths(
+                    output_root=output_root,
+                    run_id=run_id,
                 )
             )
 
-            run_directory.mkdir(
+            artifacts.raster_path.parent.mkdir(
                 parents=True,
                 exist_ok=True,
             )
 
             raster_path = (
-                run_directory
-                / "coverage.tif"
+                artifacts.raster_path
             )
 
             geojson_path = (
-                run_directory
-                / "coverage.geojson"
+                artifacts.geojson_path
             )
 
             write_coverage_geotiff(
@@ -791,8 +789,8 @@ def process_one_itm_run() -> bool:
             complete_itm_run(
                 connection,
                 run_id=run_id,
-                raster_path=(
-                    raster_path.resolve()
+                coverage_raster_uri=(
+                    artifacts.raster_key
                 ),
                 coverage_geometry=(
                     coverage_geometry
