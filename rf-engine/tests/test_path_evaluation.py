@@ -14,7 +14,9 @@ from geovaris_rf.terrain_profile import (
     TerrainProfile,
     TerrainProfileSample,
 )
-
+from geovaris_rf.clutter_loss import (
+    ClutterLossResult,
+)
 
 class DummyPropagationModel(
     PropagationModel
@@ -231,7 +233,212 @@ class PathEvaluationTests(
             ],
             600.0,
         )
+    def test_without_clutter_preserves_existing_loss_semantics(
+        self,
+    ):
+        request = PathEvaluationRequest(
+            propagation_request=(
+                self._make_propagation_request()
+            ),
+            eirp_dbm=60.0,
+            receiver_threshold_dbm=-90.0,
+        )
 
+        result = evaluate_path(
+            DummyPropagationModel(),
+            request,
+        )
+
+        self.assertEqual(
+            result.propagation_loss_db,
+            120.0,
+        )
+
+        self.assertEqual(
+            result.terrain_loss_db,
+            120.0,
+        )
+
+        self.assertIsNone(
+            result.clutter_loss_db
+        )
+
+        self.assertEqual(
+            result.total_path_loss_db,
+            120.0,
+        )
+
+    def test_clutter_loss_is_added_to_total_path_loss(
+        self,
+    ):
+        clutter_loss = (
+            ClutterLossResult(
+                model_name=(
+                    "ITU-R P.2108 Terrestrial "
+                    "Statistical Clutter"
+                ),
+                model_version=(
+                    "P.2108-1 (09/2021) §3.2"
+                ),
+                clutter_loss_db=20.0,
+                assumptions={
+                    "correction_end":
+                        "receiver",
+                },
+            )
+        )
+
+        request = PathEvaluationRequest(
+            propagation_request=(
+                self._make_propagation_request()
+            ),
+            eirp_dbm=60.0,
+            clutter_loss=clutter_loss,
+            receiver_threshold_dbm=-90.0,
+        )
+
+        result = evaluate_path(
+            DummyPropagationModel(),
+            request,
+        )
+
+        self.assertEqual(
+            result.terrain_loss_db,
+            120.0,
+        )
+
+        self.assertEqual(
+            result.clutter_loss_db,
+            20.0,
+        )
+
+        self.assertEqual(
+            result.total_path_loss_db,
+            140.0,
+        )
+
+    def test_clutter_loss_affects_received_power(
+        self,
+    ):
+        clutter_loss = (
+            ClutterLossResult(
+                model_name="Test Clutter",
+                model_version="1.0",
+                clutter_loss_db=20.0,
+            )
+        )
+
+        request = PathEvaluationRequest(
+            propagation_request=(
+                self._make_propagation_request()
+            ),
+            eirp_dbm=60.0,
+            clutter_loss=clutter_loss,
+            receiver_threshold_dbm=-90.0,
+        )
+
+        result = evaluate_path(
+            DummyPropagationModel(),
+            request,
+        )
+
+        self.assertEqual(
+            result.predicted_received_power_dbm,
+            -80.0,
+        )
+
+        self.assertEqual(
+            result.margin_db,
+            10.0,
+        )
+
+        self.assertTrue(
+            result.meets_threshold,
+        )
+
+    def test_clutter_lineage_is_preserved(
+        self,
+    ):
+        clutter_loss = (
+            ClutterLossResult(
+                model_name="Test Clutter",
+                model_version="2.0",
+                clutter_loss_db=10.0,
+                assumptions={
+                    "clutter_class":
+                        "dense_suburban",
+                },
+            )
+        )
+
+        request = PathEvaluationRequest(
+            propagation_request=(
+                self._make_propagation_request()
+            ),
+            eirp_dbm=60.0,
+            clutter_loss=clutter_loss,
+        )
+
+        result = evaluate_path(
+            DummyPropagationModel(),
+            request,
+        )
+
+        self.assertIs(
+            result.clutter_loss,
+            clutter_loss,
+        )
+
+        self.assertEqual(
+            result.clutter_loss.model_name,
+            "Test Clutter",
+        )
+
+        self.assertEqual(
+            result.clutter_loss.assumptions[
+                "clutter_class"
+            ],
+            "dense_suburban",
+        )
+
+    def test_negative_statistical_clutter_correction_is_preserved(
+        self,
+    ):
+        clutter_loss = (
+            ClutterLossResult(
+                model_name="Statistical Clutter",
+                model_version="1.0",
+                clutter_loss_db=-0.5,
+            )
+        )
+
+        request = PathEvaluationRequest(
+            propagation_request=(
+                self._make_propagation_request()
+            ),
+            eirp_dbm=60.0,
+            clutter_loss=clutter_loss,
+        )
+
+        result = evaluate_path(
+            DummyPropagationModel(),
+            request,
+        )
+
+        self.assertEqual(
+            result.terrain_loss_db,
+            120.0,
+        )
+
+        self.assertEqual(
+            result.clutter_loss_db,
+            -0.5,
+        )
+
+        self.assertEqual(
+            result.total_path_loss_db,
+            119.5,
+        )
 
 if __name__ == "__main__":
     unittest.main()
