@@ -106,7 +106,7 @@ class ClutterLossResult:
                 "model_version must not be empty."
             )
 
-        _validate_nonnegative_finite(
+        _validate_finite(
             self.clutter_loss_db,
             "clutter_loss_db",
         )
@@ -154,6 +154,22 @@ class ClutterLossModel(
     ) -> ClutterLossResult:
         """Calculate additional clutter loss in dB."""
 
+def _validate_finite(
+    value: float,
+    field_name: str,
+) -> None:
+    """Validate a finite numeric value."""
+
+    numeric_value = float(
+        value
+    )
+
+    if not math.isfinite(
+        numeric_value
+    ):
+        raise ValueError(
+            f"{field_name} must be finite."
+        )    
 
 def _validate_positive_finite(
     value: float,
