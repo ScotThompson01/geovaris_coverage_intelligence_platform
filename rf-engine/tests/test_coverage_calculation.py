@@ -1,18 +1,17 @@
 import unittest
 from unittest.mock import patch
 
+from geovaris_rf.clutter import (
+    ClutterSample,
+    GeoVarisClutterClass,
+    NlcdLandCoverClass,
+)
 from geovaris_rf.coverage_calculation import (
     CoverageCellStatus,
     calculate_coverage_subset,
 )
 from geovaris_rf.coverage_grid import (
     plan_coverage_grid,
-)
-from geovaris_rf.path_evaluation import (
-    PathEvaluationResult,
-)
-from geovaris_rf.link_budget import (
-    LinkBudgetResult,
 )
 from geovaris_rf.propagation import (
     PropagationModel,
@@ -271,6 +270,324 @@ class CoverageCalculationTests(
                 receiver_threshold_dbm=-90.0,
                 max_propagation_cells=0,
             )
+
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_clutter"
+    )
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_terrain_profile"
+    )
+    def test_without_clutter_preserves_existing_behavior(
+        self,
+        mock_terrain,
+        mock_clutter,
+    ):
+        mock_terrain.return_value = (
+            self._make_profile()
+        )
+
+        result = calculate_coverage_subset(
+            model=DummyPropagationModel(),
+            grid=self._make_grid(),
+            dem_raster_path="terrain.tif",
+            frequency_mhz=600.0,
+            transmitter_height_agl_m=45.72,
+            receiver_height_agl_m=2.0,
+            terrain_sample_spacing_m=30.0,
+            eirp_dbm=60.0,
+            receiver_gain_dbi=0.0,
+            additional_losses_db=0.0,
+            receiver_threshold_dbm=-90.0,
+            max_propagation_cells=1,
+        )
+
+        mock_clutter.assert_not_called()
+
+        evaluated = next(
+            cell
+            for cell in result.cells
+            if (
+                cell.status
+                == CoverageCellStatus.EVALUATED
+            )
+        )
+
+        self.assertEqual(
+            evaluated.terrain_loss_db,
+            120.0,
+        )
+
+        self.assertIsNone(
+            evaluated.clutter_loss_db
+        )
+
+        self.assertEqual(
+            evaluated.total_path_loss_db,
+            120.0,
+        )
+
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_clutter"
+    )
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_terrain_profile"
+    )
+    def test_applicable_clutter_changes_cell_link_budget(
+        self,
+        mock_terrain,
+        mock_clutter,
+    ):
+        mock_terrain.return_value = (
+            self._make_profile()
+        )
+
+        mock_clutter.return_value = (
+            ClutterSample(
+                latitude=28.54,
+                longitude=-81.3792,
+                source_class_value=23,
+                source_class=(
+                    NlcdLandCoverClass
+                    .DEVELOPED_MEDIUM_INTENSITY
+                ),
+                clutter_class=(
+                    GeoVarisClutterClass
+                    .DENSE_SUBURBAN
+                ),
+            )
+        )
+
+        result = calculate_coverage_subset(
+            model=DummyPropagationModel(),
+            grid=self._make_grid(),
+            dem_raster_path="terrain.tif",
+            clutter_raster_path="clutter.tif",
+            frequency_mhz=600.0,
+            transmitter_height_agl_m=45.72,
+            receiver_height_agl_m=2.0,
+            terrain_sample_spacing_m=30.0,
+            eirp_dbm=60.0,
+            receiver_gain_dbi=0.0,
+            additional_losses_db=0.0,
+            receiver_threshold_dbm=-90.0,
+            max_propagation_cells=1,
+            clutter_percentage_locations=50.0,
+        )
+
+        evaluated = next(
+            cell
+            for cell in result.cells
+            if (
+                cell.status
+                == CoverageCellStatus.EVALUATED
+            )
+        )
+
+        self.assertEqual(
+            evaluated.terrain_loss_db,
+            120.0,
+        )
+
+        self.assertIsNotNone(
+            evaluated.clutter_loss_db
+        )
+
+        self.assertGreater(
+            evaluated.total_path_loss_db,
+            evaluated.terrain_loss_db,
+        )
+
+        self.assertLess(
+            evaluated.predicted_received_power_dbm,
+            -60.0,
+        )
+
+        self.assertEqual(
+            evaluated.clutter_source_class_value,
+            23,
+        )
+
+        self.assertEqual(
+            evaluated.clutter_class,
+            "dense_suburban",
+        )
+
+        self.assertEqual(
+            evaluated.clutter_applicability_status,
+            "applicable",
+        )
+
+        self.assertEqual(
+            evaluated.clutter_model_name,
+            (
+                "ITU-R P.2108 Terrestrial "
+                "Statistical Clutter"
+            ),
+        )
+
+        self.assertEqual(
+            evaluated.clutter_model_version,
+            "P.2108-1 (09/2021) §3.2",
+        )
+
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_clutter"
+    )
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_terrain_profile"
+    )
+    def test_nonapplicable_clutter_is_not_silently_zero_db(
+        self,
+        mock_terrain,
+        mock_clutter,
+    ):
+        mock_terrain.return_value = (
+            self._make_profile()
+        )
+
+        mock_clutter.return_value = (
+            ClutterSample(
+                latitude=28.54,
+                longitude=-81.3792,
+                source_class_value=11,
+                source_class=(
+                    NlcdLandCoverClass.OPEN_WATER
+                ),
+                clutter_class=(
+                    GeoVarisClutterClass.WATER
+                ),
+            )
+        )
+
+        result = calculate_coverage_subset(
+            model=DummyPropagationModel(),
+            grid=self._make_grid(),
+            dem_raster_path="terrain.tif",
+            clutter_raster_path="clutter.tif",
+            frequency_mhz=600.0,
+            transmitter_height_agl_m=45.72,
+            receiver_height_agl_m=2.0,
+            terrain_sample_spacing_m=30.0,
+            eirp_dbm=60.0,
+            receiver_gain_dbi=0.0,
+            additional_losses_db=0.0,
+            receiver_threshold_dbm=-90.0,
+            max_propagation_cells=1,
+        )
+
+        evaluated = next(
+            cell
+            for cell in result.cells
+            if (
+                cell.status
+                == CoverageCellStatus.EVALUATED
+            )
+        )
+
+        self.assertEqual(
+            evaluated.clutter_class,
+            "water",
+        )
+
+        self.assertEqual(
+            evaluated.clutter_applicability_status,
+            "not_applicable",
+        )
+
+        self.assertIsNone(
+            evaluated.clutter_loss_db
+        )
+
+        self.assertIsNone(
+            evaluated.clutter_model_name
+        )
+
+        self.assertEqual(
+            evaluated.total_path_loss_db,
+            120.0,
+        )
+
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_clutter"
+    )
+    @patch(
+        "geovaris_rf.coverage_calculation.sample_terrain_profile"
+    )
+    def test_forest_preserves_future_model_status(
+        self,
+        mock_terrain,
+        mock_clutter,
+    ):
+        mock_terrain.return_value = (
+            self._make_profile()
+        )
+
+        mock_clutter.return_value = (
+            ClutterSample(
+                latitude=28.54,
+                longitude=-81.3792,
+                source_class_value=42,
+                source_class=(
+                    NlcdLandCoverClass
+                    .EVERGREEN_FOREST
+                ),
+                clutter_class=(
+                    GeoVarisClutterClass.FOREST
+                ),
+            )
+        )
+
+        result = calculate_coverage_subset(
+            model=DummyPropagationModel(),
+            grid=self._make_grid(),
+            dem_raster_path="terrain.tif",
+            clutter_raster_path="clutter.tif",
+            frequency_mhz=600.0,
+            transmitter_height_agl_m=45.72,
+            receiver_height_agl_m=2.0,
+            terrain_sample_spacing_m=30.0,
+            eirp_dbm=60.0,
+            receiver_gain_dbi=0.0,
+            additional_losses_db=0.0,
+            receiver_threshold_dbm=-90.0,
+            max_propagation_cells=1,
+        )
+
+        evaluated = next(
+            cell
+            for cell in result.cells
+            if (
+                cell.status
+                == CoverageCellStatus.EVALUATED
+            )
+        )
+
+        self.assertEqual(
+            evaluated.clutter_class,
+            "forest",
+        )
+
+        self.assertEqual(
+            evaluated.clutter_applicability_status,
+            "future_model",
+        )
+
+        self.assertIsNone(
+            evaluated.clutter_loss_db
+        )
+
+        self.assertIsNone(
+            evaluated.clutter_model_name
+        )
+
+        self.assertTrue(
+            any(
+                "vegetation-specific"
+                in warning
+                for warning
+                in evaluated.warnings
+            )
+        )
 
 
 if __name__ == "__main__":
