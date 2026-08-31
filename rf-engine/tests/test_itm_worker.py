@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from geovaris_rf.itm_worker import (
     P2108_CLUTTER_MODEL,
@@ -10,6 +11,7 @@ from geovaris_rf.itm_worker import (
     _read_geojson_geometry,
     _run_uses_clutter,
     _validate_clutter_configuration,
+    get_requested_run_id,
 )
 
 
@@ -30,6 +32,36 @@ def build_clutter_run() -> dict:
             P2108_CORRECTION_END
         ),
     }
+
+
+class TestRequestedRunId(unittest.TestCase):
+    @patch.dict(
+        "os.environ",
+        {
+            "GEOVARIS_COVERAGE_RUN_ID":
+                "a284dfef-e1be-4725-8e69-4a6c8d6360e2"
+        },
+        clear=False,
+    )
+    def test_requested_run_id_is_read(
+        self,
+    ) -> None:
+        self.assertEqual(
+            get_requested_run_id(),
+            "a284dfef-e1be-4725-8e69-4a6c8d6360e2",
+        )
+
+    @patch.dict(
+        "os.environ",
+        {},
+        clear=True,
+    )
+    def test_requested_run_id_is_optional(
+        self,
+    ) -> None:
+        self.assertIsNone(
+            get_requested_run_id()
+        )
 
 
 class TestClutterConfiguration(unittest.TestCase):
