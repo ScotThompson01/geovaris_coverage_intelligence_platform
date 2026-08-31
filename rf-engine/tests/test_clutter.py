@@ -4,9 +4,11 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from pyproj import Transformer
 from rasterio.transform import from_origin
 
 from geovaris_rf.clutter import (
+    ClutterRasterSampler,
     GeoVarisClutterClass,
     NlcdLandCoverClass,
     nlcd_class_to_clutter,
@@ -53,6 +55,34 @@ class ClutterTests(
                 data,
                 1,
             )
+
+    def _point_inside_test_raster(
+        self,
+    ) -> tuple[
+        float,
+        float,
+    ]:
+        """Return latitude/longitude near the raster center."""
+
+        transformer = (
+            Transformer.from_crs(
+                "EPSG:32617",
+                "EPSG:4326",
+                always_xy=True,
+            )
+        )
+
+        longitude, latitude = (
+            transformer.transform(
+                400150.0,
+                3199850.0,
+            )
+        )
+
+        return (
+            latitude,
+            longitude,
+        )
 
     def test_low_intensity_developed_maps_to_suburban(
         self,
@@ -217,6 +247,142 @@ class ClutterTests(
                 validate_nlcd_raster(
                     raster_path
                 )
+
+    def test_reusable_sampler_samples_multiple_points(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            raster_path = (
+                Path(temp_dir)
+                / "clutter.tif"
+            )
+
+            self._write_test_raster(
+                raster_path,
+                value=23,
+            )
+
+            (
+                latitude,
+                longitude,
+            ) = self._point_inside_test_raster()
+
+            with ClutterRasterSampler(
+                raster_path
+            ) as sampler:
+                first = sampler.sample(
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+
+                second = sampler.sample(
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+
+                self.assertEqual(
+                    sampler.metadata.width,
+                    10,
+                )
+
+            self.assertEqual(
+                first.source_class_value,
+                23,
+            )
+
+            self.assertEqual(
+                first.source_class,
+                (
+                    NlcdLandCoverClass
+                    .DEVELOPED_MEDIUM_INTENSITY
+                ),
+            )
+
+            self.assertEqual(
+                first.clutter_class,
+                (
+                    GeoVarisClutterClass
+                    .DENSE_SUBURBAN
+                ),
+            )
+
+            self.assertEqual(
+                second,
+                first,
+            )
+
+    def test_sampler_requires_open_context(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            raster_path = (
+                Path(temp_dir)
+                / "clutter.tif"
+            )
+
+            self._write_test_raster(
+                raster_path
+            )
+
+            (
+                latitude,
+                longitude,
+            ) = self._point_inside_test_raster()
+
+            sampler = ClutterRasterSampler(
+                raster_path
+            )
+
+            with self.assertRaises(
+                RuntimeError
+            ):
+                sampler.sample(
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+
+    def test_sample_clutter_wrapper_preserves_behavior(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            raster_path = (
+                Path(temp_dir)
+                / "clutter.tif"
+            )
+
+            self._write_test_raster(
+                raster_path,
+                value=24,
+            )
+
+            (
+                latitude,
+                longitude,
+            ) = self._point_inside_test_raster()
+
+            sample = sample_clutter(
+                raster_path=raster_path,
+                latitude=latitude,
+                longitude=longitude,
+            )
+
+            self.assertEqual(
+                sample.source_class_value,
+                24,
+            )
+
+            self.assertEqual(
+                sample.source_class,
+                (
+                    NlcdLandCoverClass
+                    .DEVELOPED_HIGH_INTENSITY
+                ),
+            )
+
+            self.assertEqual(
+                sample.clutter_class,
+                GeoVarisClutterClass.URBAN,
+            )
 
 
 if __name__ == "__main__":

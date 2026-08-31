@@ -5,6 +5,14 @@ import { sql } from "@/lib/db";
 const FREE_SPACE_MODEL = "free_space_test";
 const NTIA_ITM_MODEL = "ntia_itm";
 
+const P2108_CLUTTER_MODEL =
+  "ITU-R P.2108 Terrestrial Statistical Clutter";
+
+const P2108_CLUTTER_MODEL_VERSION =
+  "P.2108-1 (09/2021) §3.2";
+
+const P2108_CORRECTION_END = "receiver";
+
 type CreateScenarioRequest = {
   siteId?: string;
   name?: string;
@@ -31,6 +39,15 @@ type CreateScenarioRequest = {
   itmConductivitySPerM?: number;
   itmConfidence?: number;
   itmReliability?: number;
+
+  clutterSource?: string;
+  clutterVersion?: string;
+
+  clutterModel?: string;
+  clutterModelVersion?: string;
+
+  clutterPercentageLocations?: number;
+  clutterCorrectionEnd?: string;
 };
 
 function optionalNumber(
@@ -47,6 +64,20 @@ function optionalNumber(
     : null;
 }
 
+function optionalTrimmedString(
+  value: string | undefined,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+
+  return trimmedValue.length > 0
+    ? trimmedValue
+    : null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body =
@@ -55,70 +86,150 @@ export async function POST(request: NextRequest) {
     const siteId = body.siteId;
     const name = body.name?.trim();
 
-    const frequencyMhz = Number(body.frequencyMhz);
-    const eirpWatts = Number(body.eirpWatts);
+    const frequencyMhz = Number(
+      body.frequencyMhz,
+    );
 
-    const antennaHeightM =
-      Number(body.antennaHeightM);
+    const eirpWatts = Number(
+      body.eirpWatts,
+    );
+
+    const antennaHeightM = Number(
+      body.antennaHeightM,
+    );
 
     const antennaGainDbi =
-      optionalNumber(body.antennaGainDbi);
+      optionalNumber(
+        body.antennaGainDbi,
+      );
 
     const receiverHeightM =
-      optionalNumber(body.receiverHeightM);
+      optionalNumber(
+        body.receiverHeightM,
+      );
 
     const receiverThresholdDbm =
-      Number(body.receiverThresholdDbm);
+      Number(
+        body.receiverThresholdDbm,
+      );
 
     const calculationRadiusM =
-      Number(body.calculationRadiusM);
+      Number(
+        body.calculationRadiusM,
+      );
 
     const resolutionM =
-      Number(body.resolutionM);
+      Number(
+        body.resolutionM,
+      );
 
     const propagationModel =
       body.propagationModel?.trim();
 
+    const clutterSource =
+      optionalTrimmedString(
+        body.clutterSource,
+      );
+
+    const clutterVersion =
+      optionalTrimmedString(
+        body.clutterVersion,
+      );
+
+    const clutterModel =
+      optionalTrimmedString(
+        body.clutterModel,
+      );
+
+    const clutterModelVersion =
+      optionalTrimmedString(
+        body.clutterModelVersion,
+      );
+
+    const clutterPercentageLocations =
+      optionalNumber(
+        body.clutterPercentageLocations,
+      );
+
+    const clutterCorrectionEnd =
+      optionalTrimmedString(
+        body.clutterCorrectionEnd,
+      );
+
+    const clutterRequested = [
+      clutterSource,
+      clutterVersion,
+      clutterModel,
+      clutterModelVersion,
+      clutterPercentageLocations,
+      clutterCorrectionEnd,
+    ].some(
+      (value) =>
+        value !== null &&
+        value !== undefined,
+    );
+
     if (!siteId) {
       return NextResponse.json(
-        { error: "Site is required." },
-        { status: 400 },
+        {
+          error: "Site is required.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
     if (!name) {
       return NextResponse.json(
-        { error: "Scenario name is required." },
-        { status: 400 },
+        {
+          error:
+            "Scenario name is required.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
     if (
-      !Number.isFinite(frequencyMhz) ||
+      !Number.isFinite(
+        frequencyMhz,
+      ) ||
       frequencyMhz <= 0
     ) {
       return NextResponse.json(
         {
-          error: "Frequency must be greater than zero.",
+          error:
+            "Frequency must be greater than zero.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     if (
-      !Number.isFinite(eirpWatts) ||
+      !Number.isFinite(
+        eirpWatts,
+      ) ||
       eirpWatts <= 0
     ) {
       return NextResponse.json(
         {
-          error: "EIRP must be greater than zero.",
+          error:
+            "EIRP must be greater than zero.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     if (
-      !Number.isFinite(antennaHeightM) ||
+      !Number.isFinite(
+        antennaHeightM,
+      ) ||
       antennaHeightM <= 0
     ) {
       return NextResponse.json(
@@ -126,24 +237,32 @@ export async function POST(request: NextRequest) {
           error:
             "Antenna height must be greater than zero.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     if (
-      !Number.isFinite(receiverThresholdDbm)
+      !Number.isFinite(
+        receiverThresholdDbm,
+      )
     ) {
       return NextResponse.json(
         {
           error:
             "Receiver threshold must be a valid number.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     if (
-      !Number.isFinite(calculationRadiusM) ||
+      !Number.isFinite(
+        calculationRadiusM,
+      ) ||
       calculationRadiusM <= 0
     ) {
       return NextResponse.json(
@@ -151,12 +270,16 @@ export async function POST(request: NextRequest) {
           error:
             "Calculation radius must be greater than zero.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     if (
-      !Number.isFinite(resolutionM) ||
+      !Number.isFinite(
+        resolutionM,
+      ) ||
       resolutionM <= 0
     ) {
       return NextResponse.json(
@@ -164,68 +287,93 @@ export async function POST(request: NextRequest) {
           error:
             "Resolution must be greater than zero.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     if (
-      propagationModel !== FREE_SPACE_MODEL &&
-      propagationModel !== NTIA_ITM_MODEL
+      propagationModel !==
+        FREE_SPACE_MODEL &&
+      propagationModel !==
+        NTIA_ITM_MODEL
     ) {
       return NextResponse.json(
         {
           error:
             "Unsupported propagation model.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
     let itmClimate: number | null = null;
-    let itmPolarization: number | null = null;
-    let itmVariabilityMode: number | null = null;
-    let itmSurfaceRefractivity: number | null = null;
-    let itmDielectricConstant: number | null = null;
-    let itmConductivitySPerM: number | null = null;
-    let itmConfidence: number | null = null;
-    let itmReliability: number | null = null;
+    let itmPolarization:
+      number | null = null;
+    let itmVariabilityMode:
+      number | null = null;
+    let itmSurfaceRefractivity:
+      number | null = null;
+    let itmDielectricConstant:
+      number | null = null;
+    let itmConductivitySPerM:
+      number | null = null;
+    let itmConfidence:
+      number | null = null;
+    let itmReliability:
+      number | null = null;
 
-    if (propagationModel === NTIA_ITM_MODEL) {
+    if (
+      propagationModel ===
+      NTIA_ITM_MODEL
+    ) {
       itmClimate = optionalNumber(
         body.itmClimate,
       );
 
-      itmPolarization = optionalNumber(
-        body.itmPolarization,
-      );
+      itmPolarization =
+        optionalNumber(
+          body.itmPolarization,
+        );
 
-      itmVariabilityMode = optionalNumber(
-        body.itmVariabilityMode,
-      );
+      itmVariabilityMode =
+        optionalNumber(
+          body.itmVariabilityMode,
+        );
 
-      itmSurfaceRefractivity = optionalNumber(
-        body.itmSurfaceRefractivity,
-      );
+      itmSurfaceRefractivity =
+        optionalNumber(
+          body.itmSurfaceRefractivity,
+        );
 
-      itmDielectricConstant = optionalNumber(
-        body.itmDielectricConstant,
-      );
+      itmDielectricConstant =
+        optionalNumber(
+          body.itmDielectricConstant,
+        );
 
-      itmConductivitySPerM = optionalNumber(
-        body.itmConductivitySPerM,
-      );
+      itmConductivitySPerM =
+        optionalNumber(
+          body.itmConductivitySPerM,
+        );
 
-      itmConfidence = optionalNumber(
-        body.itmConfidence,
-      );
+      itmConfidence =
+        optionalNumber(
+          body.itmConfidence,
+        );
 
-      itmReliability = optionalNumber(
-        body.itmReliability,
-      );
+      itmReliability =
+        optionalNumber(
+          body.itmReliability,
+        );
 
       if (
         itmClimate === null ||
-        !Number.isInteger(itmClimate) ||
+        !Number.isInteger(
+          itmClimate,
+        ) ||
         itmClimate < 1 ||
         itmClimate > 7
       ) {
@@ -234,27 +382,40 @@ export async function POST(request: NextRequest) {
             error:
               "ITM climate must be an integer from 1 through 7.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
 
       if (
         itmPolarization === null ||
-        !Number.isInteger(itmPolarization) ||
-        ![0, 1].includes(itmPolarization)
+        !Number.isInteger(
+          itmPolarization,
+        ) ||
+        ![
+          0,
+          1,
+        ].includes(
+          itmPolarization,
+        )
       ) {
         return NextResponse.json(
           {
             error:
               "ITM polarization must be 0 or 1.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
 
       if (
         itmVariabilityMode === null ||
-        !Number.isInteger(itmVariabilityMode) ||
+        !Number.isInteger(
+          itmVariabilityMode,
+        ) ||
         itmVariabilityMode < 0 ||
         itmVariabilityMode > 3
       ) {
@@ -263,7 +424,9 @@ export async function POST(request: NextRequest) {
             error:
               "ITM variability mode must be an integer from 0 through 3.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
 
@@ -277,7 +440,9 @@ export async function POST(request: NextRequest) {
             error:
               "ITM surface refractivity must be between 250 and 400.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
 
@@ -290,7 +455,9 @@ export async function POST(request: NextRequest) {
             error:
               "ITM dielectric constant must be greater than 1.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
 
@@ -303,7 +470,9 @@ export async function POST(request: NextRequest) {
             error:
               "ITM conductivity must be greater than zero.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
 
@@ -317,7 +486,9 @@ export async function POST(request: NextRequest) {
             error:
               "ITM confidence must be greater than 0 and less than 1.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
         );
       }
 
@@ -331,7 +502,106 @@ export async function POST(request: NextRequest) {
             error:
               "ITM reliability must be greater than 0 and less than 1.",
           },
-          { status: 400 },
+          {
+            status: 400,
+          },
+        );
+      }
+    }
+
+    if (
+      clutterRequested &&
+      propagationModel !==
+        NTIA_ITM_MODEL
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Clutter modeling is currently supported only with NTIA ITM scenarios.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    if (clutterRequested) {
+      if (
+        clutterSource === null ||
+        clutterVersion === null ||
+        clutterModel === null ||
+        clutterModelVersion === null ||
+        clutterPercentageLocations === null ||
+        clutterCorrectionEnd === null
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Clutter-enabled scenarios must provide complete clutter dataset and model parameters.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        clutterModel !==
+        P2108_CLUTTER_MODEL
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Unsupported clutter model.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        clutterModelVersion !==
+        P2108_CLUTTER_MODEL_VERSION
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Unsupported clutter model version.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        clutterPercentageLocations <= 0 ||
+        clutterPercentageLocations >= 100
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Clutter percentage of locations must be greater than 0 and less than 100.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        clutterCorrectionEnd !==
+        P2108_CORRECTION_END
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Current GeoVaris coverage calculations support receiver-side P.2108 clutter correction only.",
+          },
+          {
+            status: 400,
+          },
         );
       }
     }
@@ -353,8 +623,13 @@ export async function POST(request: NextRequest) {
 
     if (!site) {
       return NextResponse.json(
-        { error: "Site was not found." },
-        { status: 404 },
+        {
+          error:
+            "Site was not found.",
+        },
+        {
+          status: 404,
+        },
       );
     }
 
@@ -385,7 +660,14 @@ export async function POST(request: NextRequest) {
         itm_dielectric_constant,
         itm_conductivity_s_per_m,
         itm_confidence,
-        itm_reliability
+        itm_reliability,
+
+        clutter_source,
+        clutter_version,
+        clutter_model,
+        clutter_model_version,
+        clutter_percentage_locations,
+        clutter_correction_end
       )
       VALUES (
         ${site.customer_id},
@@ -413,21 +695,33 @@ export async function POST(request: NextRequest) {
         ${itmDielectricConstant},
         ${itmConductivitySPerM},
         ${itmConfidence},
-        ${itmReliability}
+        ${itmReliability},
+
+        ${clutterSource},
+        ${clutterVersion},
+        ${clutterModel},
+        ${clutterModelVersion},
+        ${clutterPercentageLocations},
+        ${clutterCorrectionEnd}
       )
       RETURNING
         id,
         customer_id,
         site_id,
         name,
+
         frequency_mhz,
         eirp_watts,
+
         antenna_height_m,
         antenna_gain_dbi,
+
         receiver_height_m,
         receiver_threshold_dbm,
+
         calculation_radius_m,
         resolution_m,
+
         propagation_model,
 
         itm_climate,
@@ -439,15 +733,25 @@ export async function POST(request: NextRequest) {
         itm_confidence,
         itm_reliability,
 
+        clutter_source,
+        clutter_version,
+        clutter_model,
+        clutter_model_version,
+        clutter_percentage_locations,
+        clutter_correction_end,
+
         created_at;
     `;
 
     return NextResponse.json(
       {
         status: "ok",
-        scenario: scenarios[0],
+        scenario:
+          scenarios[0],
       },
-      { status: 201 },
+      {
+        status: 201,
+      },
     );
   } catch (error) {
     console.error(
@@ -457,9 +761,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "Unable to create scenario.",
+        error:
+          "Unable to create scenario.",
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }

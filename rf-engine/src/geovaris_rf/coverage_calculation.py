@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from geovaris_rf.clutter import (
-    sample_clutter,
+    ClutterRasterSampler,
 )
 from geovaris_rf.clutter_loss import (
     ClutterLossRequest,
@@ -183,7 +183,7 @@ def _inside_radius_points(
     )
 
 
-def calculate_coverage_subset(
+def _calculate_coverage_points(
     *,
     model: PropagationModel,
     grid: CoverageGridPlan,
@@ -197,88 +197,10 @@ def calculate_coverage_subset(
     additional_losses_db: float,
     receiver_threshold_dbm: float,
     max_propagation_cells: int,
-    clutter_raster_path: str | None = None,
-    clutter_percentage_locations: float = 50.0,
+    clutter_sampler: ClutterRasterSampler | None,
+    clutter_percentage_locations: float,
 ) -> CoverageCalculationResult:
-    """Evaluate a bounded deterministic subset of a coverage grid.
-
-    Cells are processed in the same row-major order stored by the
-    CoverageGridPlan.
-
-    The transmitter-site cell is explicitly identified and is not
-    passed to the propagation model because its path distance is zero.
-
-    ``max_propagation_cells`` limits only actual propagation
-    calculations.
-
-    When ``clutter_raster_path`` is supplied, the receiver location is
-    sampled from the clutter raster.
-
-    GeoVaris then:
-
-    1. maps the source land-cover class into a normalized clutter class;
-    2. evaluates P.2108 applicability;
-    3. applies receiver-side P.2108 loss only when applicable and the
-       path satisfies the model's minimum-distance requirement;
-    4. preserves explicit clutter lineage even when no clutter loss is
-       calculated.
-
-    No clutter raster means the pre-clutter behavior is preserved.
-    """
-
-    if max_propagation_cells <= 0:
-        raise ValueError(
-            "max_propagation_cells must be greater than zero; "
-            f"got {max_propagation_cells}."
-        )
-
-    _validate_positive_finite(
-        terrain_sample_spacing_m,
-        "terrain_sample_spacing_m",
-    )
-
-    _validate_nonnegative_finite(
-        transmitter_height_agl_m,
-        "transmitter_height_agl_m",
-    )
-
-    _validate_nonnegative_finite(
-        receiver_height_agl_m,
-        "receiver_height_agl_m",
-    )
-
-    if not math.isfinite(
-        frequency_mhz
-    ):
-        raise ValueError(
-            "frequency_mhz must be finite."
-        )
-
-    if not math.isfinite(
-        eirp_dbm
-    ):
-        raise ValueError(
-            "eirp_dbm must be finite."
-        )
-
-    if not math.isfinite(
-        receiver_gain_dbi
-    ):
-        raise ValueError(
-            "receiver_gain_dbi must be finite."
-        )
-
-    _validate_nonnegative_finite(
-        additional_losses_db,
-        "additional_losses_db",
-    )
-
-    if not math.isfinite(
-        receiver_threshold_dbm
-    ):
-        raise ValueError(
-            "receiver_threshold_dbm must be finite."
-        )
+    """Evaluate coverage cells using an optional reusable clutter sampler."""
 
     results: list[
         CoverageCellResult
@@ -356,12 +278,9 @@ def calculate_coverage_subset(
             str
         ] = []
 
-        if clutter_raster_path is not None:
+        if clutter_sampler is not None:
             clutter_sample = (
-                sample_clutter(
-                    raster_path=(
-                        clutter_raster_path
-                    ),
+                clutter_sampler.sample(
                     latitude=point.latitude,
                     longitude=point.longitude,
                 )
@@ -601,3 +520,173 @@ def calculate_coverage_subset(
             results
         ),
     )
+
+
+def calculate_coverage_subset(
+    *,
+    model: PropagationModel,
+    grid: CoverageGridPlan,
+    dem_raster_path: str,
+    frequency_mhz: float,
+    transmitter_height_agl_m: float,
+    receiver_height_agl_m: float,
+    terrain_sample_spacing_m: float,
+    eirp_dbm: float,
+    receiver_gain_dbi: float,
+    additional_losses_db: float,
+    receiver_threshold_dbm: float,
+    max_propagation_cells: int,
+    clutter_raster_path: str | None = None,
+    clutter_percentage_locations: float = 50.0,
+) -> CoverageCalculationResult:
+    """Evaluate a bounded deterministic subset of a coverage grid.
+
+    Cells are processed in the same row-major order stored by the
+    CoverageGridPlan.
+
+    The transmitter-site cell is explicitly identified and is not
+    passed to the propagation model because its path distance is zero.
+
+    ``max_propagation_cells`` limits only actual propagation
+    calculations.
+
+    When ``clutter_raster_path`` is supplied, the NLCD raster is opened
+    once and reused for all receiver-cell samples in the calculation.
+
+    GeoVaris then:
+
+    1. maps the source land-cover class into a normalized clutter class;
+    2. evaluates P.2108 applicability;
+    3. applies receiver-side P.2108 loss only when applicable and the
+       path satisfies the model's minimum-distance requirement;
+    4. preserves explicit clutter lineage even when no clutter loss is
+       calculated.
+
+    No clutter raster means the pre-clutter behavior is preserved.
+    """
+
+    if max_propagation_cells <= 0:
+        raise ValueError(
+            "max_propagation_cells must be greater than zero; "
+            f"got {max_propagation_cells}."
+        )
+
+    _validate_positive_finite(
+        terrain_sample_spacing_m,
+        "terrain_sample_spacing_m",
+    )
+
+    _validate_nonnegative_finite(
+        transmitter_height_agl_m,
+        "transmitter_height_agl_m",
+    )
+
+    _validate_nonnegative_finite(
+        receiver_height_agl_m,
+        "receiver_height_agl_m",
+    )
+
+    if not math.isfinite(
+        frequency_mhz
+    ):
+        raise ValueError(
+            "frequency_mhz must be finite."
+        )
+
+    if not math.isfinite(
+        eirp_dbm
+    ):
+        raise ValueError(
+            "eirp_dbm must be finite."
+        )
+
+    if not math.isfinite(
+        receiver_gain_dbi
+    ):
+        raise ValueError(
+            "receiver_gain_dbi must be finite."
+        )
+
+    _validate_nonnegative_finite(
+        additional_losses_db,
+        "additional_losses_db",
+    )
+
+    if not math.isfinite(
+        receiver_threshold_dbm
+    ):
+        raise ValueError(
+            "receiver_threshold_dbm must be finite."
+        )
+
+    if clutter_raster_path is None:
+        return _calculate_coverage_points(
+            model=model,
+            grid=grid,
+            dem_raster_path=dem_raster_path,
+            frequency_mhz=frequency_mhz,
+            transmitter_height_agl_m=(
+                transmitter_height_agl_m
+            ),
+            receiver_height_agl_m=(
+                receiver_height_agl_m
+            ),
+            terrain_sample_spacing_m=(
+                terrain_sample_spacing_m
+            ),
+            eirp_dbm=eirp_dbm,
+            receiver_gain_dbi=(
+                receiver_gain_dbi
+            ),
+            additional_losses_db=(
+                additional_losses_db
+            ),
+            receiver_threshold_dbm=(
+                receiver_threshold_dbm
+            ),
+            max_propagation_cells=(
+                max_propagation_cells
+            ),
+            clutter_sampler=None,
+            clutter_percentage_locations=(
+                clutter_percentage_locations
+            ),
+        )
+
+    with ClutterRasterSampler(
+        clutter_raster_path
+    ) as clutter_sampler:
+        return _calculate_coverage_points(
+            model=model,
+            grid=grid,
+            dem_raster_path=dem_raster_path,
+            frequency_mhz=frequency_mhz,
+            transmitter_height_agl_m=(
+                transmitter_height_agl_m
+            ),
+            receiver_height_agl_m=(
+                receiver_height_agl_m
+            ),
+            terrain_sample_spacing_m=(
+                terrain_sample_spacing_m
+            ),
+            eirp_dbm=eirp_dbm,
+            receiver_gain_dbi=(
+                receiver_gain_dbi
+            ),
+            additional_losses_db=(
+                additional_losses_db
+            ),
+            receiver_threshold_dbm=(
+                receiver_threshold_dbm
+            ),
+            max_propagation_cells=(
+                max_propagation_cells
+            ),
+            clutter_sampler=(
+                clutter_sampler
+            ),
+            clutter_percentage_locations=(
+                clutter_percentage_locations
+            ),
+        )

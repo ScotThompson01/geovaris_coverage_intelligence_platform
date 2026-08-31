@@ -272,7 +272,7 @@ class CoverageCalculationTests(
             )
 
     @patch(
-        "geovaris_rf.coverage_calculation.sample_clutter"
+        "geovaris_rf.coverage_calculation.ClutterRasterSampler"
     )
     @patch(
         "geovaris_rf.coverage_calculation.sample_terrain_profile"
@@ -280,7 +280,7 @@ class CoverageCalculationTests(
     def test_without_clutter_preserves_existing_behavior(
         self,
         mock_terrain,
-        mock_clutter,
+        mock_sampler_class,
     ):
         mock_terrain.return_value = (
             self._make_profile()
@@ -301,7 +301,7 @@ class CoverageCalculationTests(
             max_propagation_cells=1,
         )
 
-        mock_clutter.assert_not_called()
+        mock_sampler_class.assert_not_called()
 
         evaluated = next(
             cell
@@ -327,7 +327,7 @@ class CoverageCalculationTests(
         )
 
     @patch(
-        "geovaris_rf.coverage_calculation.sample_clutter"
+        "geovaris_rf.coverage_calculation.ClutterRasterSampler"
     )
     @patch(
         "geovaris_rf.coverage_calculation.sample_terrain_profile"
@@ -335,13 +335,20 @@ class CoverageCalculationTests(
     def test_applicable_clutter_changes_cell_link_budget(
         self,
         mock_terrain,
-        mock_clutter,
+        mock_sampler_class,
     ):
         mock_terrain.return_value = (
             self._make_profile()
         )
 
-        mock_clutter.return_value = (
+        sampler = (
+            mock_sampler_class
+            .return_value
+            .__enter__
+            .return_value
+        )
+
+        sampler.sample.return_value = (
             ClutterSample(
                 latitude=28.54,
                 longitude=-81.3792,
@@ -373,6 +380,12 @@ class CoverageCalculationTests(
             max_propagation_cells=1,
             clutter_percentage_locations=50.0,
         )
+
+        mock_sampler_class.assert_called_once_with(
+            "clutter.tif"
+        )
+
+        sampler.sample.assert_called_once()
 
         evaluated = next(
             cell
@@ -431,7 +444,7 @@ class CoverageCalculationTests(
         )
 
     @patch(
-        "geovaris_rf.coverage_calculation.sample_clutter"
+        "geovaris_rf.coverage_calculation.ClutterRasterSampler"
     )
     @patch(
         "geovaris_rf.coverage_calculation.sample_terrain_profile"
@@ -439,13 +452,20 @@ class CoverageCalculationTests(
     def test_nonapplicable_clutter_is_not_silently_zero_db(
         self,
         mock_terrain,
-        mock_clutter,
+        mock_sampler_class,
     ):
         mock_terrain.return_value = (
             self._make_profile()
         )
 
-        mock_clutter.return_value = (
+        sampler = (
+            mock_sampler_class
+            .return_value
+            .__enter__
+            .return_value
+        )
+
+        sampler.sample.return_value = (
             ClutterSample(
                 latitude=28.54,
                 longitude=-81.3792,
@@ -508,7 +528,7 @@ class CoverageCalculationTests(
         )
 
     @patch(
-        "geovaris_rf.coverage_calculation.sample_clutter"
+        "geovaris_rf.coverage_calculation.ClutterRasterSampler"
     )
     @patch(
         "geovaris_rf.coverage_calculation.sample_terrain_profile"
@@ -516,13 +536,20 @@ class CoverageCalculationTests(
     def test_forest_preserves_future_model_status(
         self,
         mock_terrain,
-        mock_clutter,
+        mock_sampler_class,
     ):
         mock_terrain.return_value = (
             self._make_profile()
         )
 
-        mock_clutter.return_value = (
+        sampler = (
+            mock_sampler_class
+            .return_value
+            .__enter__
+            .return_value
+        )
+
+        sampler.sample.return_value = (
             ClutterSample(
                 latitude=28.54,
                 longitude=-81.3792,

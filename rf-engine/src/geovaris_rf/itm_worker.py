@@ -4,7 +4,9 @@ Processes one pending ``ntia_itm`` coverage run using:
 
 - immutable RF inputs stored on coverage_runs
 - immutable ITM assumptions stored on coverage_runs
+- optional immutable clutter dataset/model assumptions
 - an explicitly configured local working DEM raster
+- an explicitly configured local working clutter raster when required
 - the validated NTIA ITM 1.4 native library
 - GeoVaris coverage-grid, GeoTIFF, and GeoJSON pipelines
 
@@ -28,6 +30,9 @@ import psycopg
 import rasterio
 from psycopg.rows import dict_row
 
+from geovaris_rf.artifacts import (
+    build_coverage_artifact_paths,
+)
 from geovaris_rf.coverage_calculation import (
     calculate_coverage_subset,
 )
@@ -50,17 +55,35 @@ from geovaris_rf.itm_model import (
     ItmModel,
     default_local_itm_dll_path,
 )
-from geovaris_rf.artifacts import (
-    build_coverage_artifact_paths,
-)
 from geovaris_rf.storage import (
     LocalCoverageStorage,
 )
+
+
 PROPAGATION_MODEL = "ntia_itm"
 MODEL_VERSION = "1.4"
 
-DEM_ENVIRONMENT_VARIABLE = "GEOVARIS_ITM_DEM_RASTER_PATH"
-OUTPUT_ROOT_ENVIRONMENT_VARIABLE = "GEOVARIS_COVERAGE_OUTPUT_DIR"
+P2108_CLUTTER_MODEL = (
+    "ITU-R P.2108 Terrestrial Statistical Clutter"
+)
+
+P2108_CLUTTER_MODEL_VERSION = (
+    "P.2108-1 (09/2021) §3.2"
+)
+
+P2108_CORRECTION_END = "receiver"
+
+DEM_ENVIRONMENT_VARIABLE = (
+    "GEOVARIS_ITM_DEM_RASTER_PATH"
+)
+
+CLUTTER_ENVIRONMENT_VARIABLE = (
+    "GEOVARIS_CLUTTER_RASTER_PATH"
+)
+
+OUTPUT_ROOT_ENVIRONMENT_VARIABLE = (
+    "GEOVARIS_COVERAGE_OUTPUT_DIR"
+)
 
 DEFAULT_OUTPUT_ROOT = Path(
     "rf-engine/data/coverage"
@@ -83,17 +106,21 @@ def get_database_url() -> str:
     return database_url
 
 
-def get_dem_raster_path() -> Path:
-    """Resolve the explicitly configured working DEM raster."""
+def _resolve_required_file(
+    *,
+    environment_variable: str,
+    description: str,
+) -> Path:
+    """Resolve an explicitly configured local working file."""
 
     configured_path = os.getenv(
-        DEM_ENVIRONMENT_VARIABLE
+        environment_variable
     )
 
     if not configured_path:
         raise RuntimeError(
-            f"{DEM_ENVIRONMENT_VARIABLE} must be configured "
-            "for NTIA ITM coverage processing."
+            f"{environment_variable} must be configured "
+            f"for {description}."
         )
 
     path = Path(
@@ -102,17 +129,43 @@ def get_dem_raster_path() -> Path:
 
     if not path.exists():
         raise FileNotFoundError(
-            "Configured ITM DEM raster does not exist: "
+            f"Configured {description} does not exist: "
             f"{path}"
         )
 
     if not path.is_file():
         raise ValueError(
-            "Configured ITM DEM raster path is not a file: "
+            f"Configured {description} is not a file: "
             f"{path}"
         )
 
     return path
+
+
+def get_dem_raster_path() -> Path:
+    """Resolve the explicitly configured working DEM raster."""
+
+    return _resolve_required_file(
+        environment_variable=(
+            DEM_ENVIRONMENT_VARIABLE
+        ),
+        description=(
+            "ITM DEM raster"
+        ),
+    )
+
+
+def get_clutter_raster_path() -> Path:
+    """Resolve the explicitly configured working clutter raster."""
+
+    return _resolve_required_file(
+        environment_variable=(
+            CLUTTER_ENVIRONMENT_VARIABLE
+        ),
+        description=(
+            "NLCD clutter raster"
+        ),
+    )
 
 
 def get_output_root() -> Path:
@@ -127,7 +180,9 @@ def get_output_root() -> Path:
             configured_path
         )
     else:
-        output_root = DEFAULT_OUTPUT_ROOT
+        output_root = (
+            DEFAULT_OUTPUT_ROOT
+        )
 
     output_root = (
         output_root
@@ -149,7 +204,9 @@ def _watts_to_dbm(
     """Convert watts to dBm."""
 
     if (
-        not math.isfinite(watts)
+        not math.isfinite(
+            watts
+        )
         or watts <= 0
     ):
         raise ValueError(
@@ -273,6 +330,13 @@ def claim_pending_itm_run(
                     itm_confidence,
                     itm_reliability,
 
+                    clutter_source,
+                    clutter_version,
+                    clutter_model,
+                    clutter_model_version,
+                    clutter_percentage_locations,
+                    clutter_correction_end,
+
                     dem_source,
                     dem_version,
                     dem_horizontal_crs,
@@ -326,7 +390,7 @@ def claim_pending_itm_run(
 def _validate_run(
     coverage_run: dict[str, Any],
 ) -> None:
-    """Validate required NTIA ITM run fields."""
+    """Validate required NTIA ITM and optional clutter fields."""
 
     if (
         coverage_run[
@@ -384,6 +448,132 @@ def _validate_run(
                 missing_fields
             )
         )
+
+    _validate_clutter_configuration(
+        coverage_run
+    )
+
+
+def _validate_clutter_configuration(
+    coverage_run: dict[str, Any],
+) -> None:
+    """Validate optional clutter dataset and model snapshot."""
+
+    field_names = (
+        "clutter_source",
+        "clutter_version",
+        "clutter_model",
+        "clutter_model_version",
+        "clutter_percentage_locations",
+        "clutter_correction_end",
+    )
+
+    values = [
+        coverage_run.get(
+            field_name
+        )
+        for field_name in field_names
+    ]
+
+    clutter_requested = any(
+        value is not None
+        for value in values
+    )
+
+    if not clutter_requested:
+        return
+
+    missing_fields = [
+        field_name
+        for field_name in field_names
+        if coverage_run.get(
+            field_name
+        ) is None
+    ]
+
+    if missing_fields:
+        raise ValueError(
+            "Coverage run has incomplete clutter parameters: "
+            + ", ".join(
+                missing_fields
+            )
+        )
+
+    clutter_model = str(
+        coverage_run[
+            "clutter_model"
+        ]
+    )
+
+    clutter_model_version = str(
+        coverage_run[
+            "clutter_model_version"
+        ]
+    )
+
+    clutter_correction_end = str(
+        coverage_run[
+            "clutter_correction_end"
+        ]
+    )
+
+    if (
+        clutter_model
+        != P2108_CLUTTER_MODEL
+    ):
+        raise ValueError(
+            "Unsupported clutter model: "
+            f"{clutter_model!r}."
+        )
+
+    if (
+        clutter_model_version
+        != P2108_CLUTTER_MODEL_VERSION
+    ):
+        raise ValueError(
+            "Unsupported clutter model version: "
+            f"{clutter_model_version!r}."
+        )
+
+    percentage_locations = float(
+        coverage_run[
+            "clutter_percentage_locations"
+        ]
+    )
+
+    if (
+        not math.isfinite(
+            percentage_locations
+        )
+        or percentage_locations <= 0
+        or percentage_locations >= 100
+    ):
+        raise ValueError(
+            "Clutter percentage of locations must be "
+            "greater than 0 and less than 100."
+        )
+
+    if (
+        clutter_correction_end
+        != P2108_CORRECTION_END
+    ):
+        raise ValueError(
+            "Current GeoVaris coverage calculations support "
+            "receiver-side P.2108 clutter correction only."
+        )
+
+
+def _run_uses_clutter(
+    coverage_run: dict[str, Any],
+) -> bool:
+    """Return True when the immutable run snapshot enables clutter."""
+
+    return (
+        coverage_run.get(
+            "clutter_model"
+        )
+        is not None
+    )
 
 
 def _build_itm_configuration(
@@ -444,7 +634,7 @@ def _build_itm_configuration(
 def _read_geojson_geometry(
     geojson_path: Path,
 ) -> dict[str, Any]:
-    """Read the single coverage geometry from generated GeoJSON."""
+    """Read and combine generated coverage Polygon/MultiPolygon features."""
 
     document = json.loads(
         geojson_path.read_text(
@@ -464,27 +654,100 @@ def _read_geojson_geometry(
         or len(
             features
         )
-        != 1
+        == 0
     ):
         raise ValueError(
-            "Expected exactly one coverage GeoJSON feature; "
-            f"got {0 if not isinstance(features, list) else len(features)}."
+            "Coverage GeoJSON must contain at least one feature."
         )
 
-    geometry = features[0].get(
-        "geometry"
-    )
+    polygons: list[
+        list[Any]
+    ] = []
 
-    if not isinstance(
-        geometry,
-        dict,
+    for index, feature in enumerate(
+        features
     ):
-        raise ValueError(
-            "Coverage GeoJSON feature does not contain "
-            "a valid geometry."
+        if not isinstance(
+            feature,
+            dict,
+        ):
+            raise ValueError(
+                "Coverage GeoJSON feature "
+                f"{index} is not a valid object."
+            )
+
+        geometry = feature.get(
+            "geometry"
         )
 
-    return geometry
+        if not isinstance(
+            geometry,
+            dict,
+        ):
+            raise ValueError(
+                "Coverage GeoJSON feature "
+                f"{index} does not contain a valid geometry."
+            )
+
+        geometry_type = geometry.get(
+            "type"
+        )
+
+        coordinates = geometry.get(
+            "coordinates"
+        )
+
+        if geometry_type == "Polygon":
+            if not isinstance(
+                coordinates,
+                list,
+            ):
+                raise ValueError(
+                    "Coverage Polygon feature "
+                    f"{index} has invalid coordinates."
+                )
+
+            polygons.append(
+                coordinates
+            )
+
+        elif geometry_type == "MultiPolygon":
+            if not isinstance(
+                coordinates,
+                list,
+            ):
+                raise ValueError(
+                    "Coverage MultiPolygon feature "
+                    f"{index} has invalid coordinates."
+                )
+
+            polygons.extend(
+                coordinates
+            )
+
+        else:
+            raise ValueError(
+                "Coverage GeoJSON contains unsupported geometry "
+                f"type {geometry_type!r}."
+            )
+
+    if not polygons:
+        raise ValueError(
+            "Coverage GeoJSON contains no polygon geometry."
+        )
+
+    if len(polygons) == 1:
+        return {
+            "type": "Polygon",
+            "coordinates": (
+                polygons[0]
+            ),
+        }
+
+    return {
+        "type": "MultiPolygon",
+        "coordinates": polygons,
+    }
 
 
 def complete_itm_run(
@@ -623,6 +886,15 @@ def process_one_itm_run() -> bool:
                 coverage_run
             )
 
+            clutter_raster_path: Path | None = None
+
+            if _run_uses_clutter(
+                coverage_run
+            ):
+                clutter_raster_path = (
+                    get_clutter_raster_path()
+                )
+
             terrain_sample_spacing_m = (
                 _terrain_sample_spacing_m(
                     dem_raster_path
@@ -693,50 +965,83 @@ def process_one_itm_run() -> bool:
                 )
             )
 
+            clutter_percentage_locations = (
+                None
+            )
+
+            if _run_uses_clutter(
+                coverage_run
+            ):
+                clutter_percentage_locations = float(
+                    coverage_run[
+                        "clutter_percentage_locations"
+                    ]
+                )
+
+            calculation_kwargs: dict[
+                str,
+                Any,
+            ] = {
+                "model": model,
+                "grid": grid,
+                "dem_raster_path": str(
+                    dem_raster_path
+                ),
+                "frequency_mhz": float(
+                    coverage_run[
+                        "frequency_mhz"
+                    ]
+                ),
+                "transmitter_height_agl_m": float(
+                    coverage_run[
+                        "antenna_height_m"
+                    ]
+                ),
+                "receiver_height_agl_m": float(
+                    coverage_run[
+                        "receiver_height_m"
+                    ]
+                ),
+                "terrain_sample_spacing_m": (
+                    terrain_sample_spacing_m
+                ),
+                "eirp_dbm": eirp_dbm,
+
+                # The stored antenna_gain_dbi is a transmitter
+                # parameter. EIRP already includes transmit gain,
+                # so it must not be added again here.
+                "receiver_gain_dbi": 0.0,
+
+                # No separate system-loss field exists in the
+                # current scenario contract yet.
+                "additional_losses_db": 0.0,
+
+                "receiver_threshold_dbm": float(
+                    coverage_run[
+                        "receiver_threshold_dbm"
+                    ]
+                ),
+                "max_propagation_cells": (
+                    propagation_cell_count
+                ),
+            }
+
+            if clutter_raster_path is not None:
+                calculation_kwargs[
+                    "clutter_raster_path"
+                ] = str(
+                    clutter_raster_path
+                )
+
+                calculation_kwargs[
+                    "clutter_percentage_locations"
+                ] = (
+                    clutter_percentage_locations
+                )
+
             calculation = (
                 calculate_coverage_subset(
-                    model=model,
-                    grid=grid,
-                    dem_raster_path=str(
-                        dem_raster_path
-                    ),
-                    frequency_mhz=float(
-                        coverage_run[
-                            "frequency_mhz"
-                        ]
-                    ),
-                    transmitter_height_agl_m=float(
-                        coverage_run[
-                            "antenna_height_m"
-                        ]
-                    ),
-                    receiver_height_agl_m=float(
-                        coverage_run[
-                            "receiver_height_m"
-                        ]
-                    ),
-                    terrain_sample_spacing_m=(
-                        terrain_sample_spacing_m
-                    ),
-                    eirp_dbm=eirp_dbm,
-
-                    # The stored antenna_gain_dbi is a transmitter
-                    # parameter. EIRP already includes transmit gain,
-                    # so it must not be added again here.
-                    receiver_gain_dbi=0.0,
-
-                    # No separate system-loss field exists in the
-                    # current scenario contract yet.
-                    additional_losses_db=0.0,
-
-                    receiver_threshold_dbm=float(
-                        coverage_run[
-                            "receiver_threshold_dbm"
-                        ]
-                    ),
-                    max_propagation_cells=(
-                        propagation_cell_count
-                    ),
+                    **calculation_kwargs
                 )
             )
 
@@ -782,6 +1087,7 @@ def process_one_itm_run() -> bool:
                     geojson_path
                 )
             )
+
             storage = (
                 LocalCoverageStorage()
             )
@@ -801,6 +1107,7 @@ def process_one_itm_run() -> bool:
                     artifacts.geojson_key
                 ),
             )
+
             processing_time_seconds = (
                 time.perf_counter()
                 - started
@@ -834,6 +1141,27 @@ def process_one_itm_run() -> bool:
                 "Terrain sample spacing: "
                 f"{terrain_sample_spacing_m:.2f} m"
             )
+
+            if clutter_raster_path is not None:
+                print(
+                    "Clutter dataset: "
+                    f"{coverage_run['clutter_source']} "
+                    f"{coverage_run['clutter_version']}"
+                )
+                print(
+                    "Clutter model: "
+                    f"{coverage_run['clutter_model']} "
+                    f"{coverage_run['clutter_model_version']}"
+                )
+                print(
+                    "Clutter percentage locations: "
+                    f"{clutter_percentage_locations:.2f}"
+                )
+                print(
+                    "Clutter correction end: "
+                    f"{coverage_run['clutter_correction_end']}"
+                )
+
             print(
                 f"GeoTIFF: {raster_path.resolve()}"
             )
@@ -867,4 +1195,3 @@ def process_one_itm_run() -> bool:
 
 if __name__ == "__main__":
     process_one_itm_run()
-    

@@ -19,134 +19,181 @@ type CoverageRunResponse = {
   } | null;
 };
 
-const POLL_INTERVAL_MS = 3000;
-
 export default function CoverageMap({
   latitude,
   longitude,
   siteName,
   scenarioId,
 }: CoverageMapProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef =
+    useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) {
       return;
     }
 
-    maplibregl.setWorkerUrl("/maplibre-gl-worker.mjs");
+    /*
+     * GeoVaris serves the MapLibre worker explicitly from /public.
+     *
+     * Keep this configuration because large GeoJSON coverage
+     * geometries are parsed and processed by the MapLibre worker.
+     */
+    maplibregl.setWorkerUrl(
+      "/maplibre-gl-worker.mjs",
+    );
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
+    const map =
+      new maplibregl.Map({
+        container:
+          containerRef.current,
 
-      style: {
-        version: 8,
+        style: {
+          version: 8,
 
-        sources: {
-          openStreetMap: {
-            type: "raster",
-            tiles: [
-              "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-            ],
-            tileSize: 256,
-            attribution: "&copy; OpenStreetMap contributors",
+          sources: {
+            openStreetMap: {
+              type: "raster",
+
+              tiles: [
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+              ],
+
+              tileSize: 256,
+
+              attribution:
+                "&copy; OpenStreetMap contributors",
+            },
           },
+
+          layers: [
+            {
+              id: "openStreetMap",
+              type: "raster",
+              source: "openStreetMap",
+            },
+          ],
         },
 
-        layers: [
-          {
-            id: "openStreetMap",
-            type: "raster",
-            source: "openStreetMap",
-          },
+        center: [
+          longitude,
+          latitude,
         ],
-      },
 
-      center: [longitude, latitude],
-      zoom: 9,
-    });
+        zoom: 9,
+      });
 
     map.addControl(
       new maplibregl.NavigationControl(),
       "top-right",
     );
 
-    const marker = new maplibregl.Marker({
-      color: "#6d28d9",
-    })
-      .setLngLat([longitude, latitude])
-      .setPopup(
-        new maplibregl.Popup({
-          offset: 25,
-        }).setHTML(
-          `<strong>${siteName}</strong><br>${latitude.toFixed(
-            4,
-          )}, ${longitude.toFixed(4)}`,
-        ),
-      )
-      .addTo(map);
+    const marker =
+      new maplibregl.Marker({
+        color: "#6d28d9",
+      })
+        .setLngLat([
+          longitude,
+          latitude,
+        ])
+        .setPopup(
+          new maplibregl.Popup({
+            offset: 25,
+          }).setHTML(
+            `<strong>${siteName}</strong><br>${latitude.toFixed(
+              4,
+            )}, ${longitude.toFixed(
+              4,
+            )}`,
+          ),
+        )
+        .addTo(map);
 
-    let lastRunId: string | null = null;
     let isActive = true;
-    let intervalId: number | null = null;
 
-    async function loadCoverage() {
+    const abortController =
+      new AbortController();
+
+    async function loadCoverage(): Promise<void> {
       try {
-        const response = await fetch(
-          `/api/coverage-runs/latest?scenarioId=${encodeURIComponent(
-            scenarioId,
-          )}`,
-          {
-            cache: "no-store",
-          },
-        );
+        const response =
+          await fetch(
+            `/api/coverage-runs/latest?scenarioId=${encodeURIComponent(
+              scenarioId,
+            )}`,
+            {
+              cache: "no-store",
+              signal:
+                abortController.signal,
+            },
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            `Coverage lookup failed with status ${response.status}.`,
+          );
+        }
 
         const data =
           (await response.json()) as CoverageRunResponse;
 
         if (
-          !response.ok ||
+          !isActive ||
           !data.coverageRun ||
-          !data.coverageRun.coverage_geometry ||
-          !isActive
+          !data.coverageRun.coverage_geometry
         ) {
           return;
         }
 
-        if (data.coverageRun.id === lastRunId) {
-          return;
-        }
+        const coverageFeature:
+          GeoJSON.Feature = {
+            type: "Feature",
 
-        lastRunId = data.coverageRun.id;
+            geometry:
+              data.coverageRun
+                .coverage_geometry,
 
-        const coverageFeature: GeoJSON.Feature = {
-          type: "Feature",
-          geometry: data.coverageRun.coverage_geometry,
-          properties: {
-            runId: data.coverageRun.id,
-            siteName: data.coverageRun.site_name,
-          },
-        };
+            properties: {
+              runId:
+                data.coverageRun.id,
 
-        const existingSource = map.getSource(
-          "coverage-result",
-        ) as maplibregl.GeoJSONSource | undefined;
+              siteName:
+                data.coverageRun
+                  .site_name,
+            },
+          };
+
+        const existingSource =
+          map.getSource(
+            "coverage-result",
+          ) as
+            | maplibregl.GeoJSONSource
+            | undefined;
 
         if (existingSource) {
-          existingSource.setData(coverageFeature);
+          existingSource.setData(
+            coverageFeature,
+          );
         } else {
-          map.addSource("coverage-result", {
-            type: "geojson",
-            data: coverageFeature,
-          });
+          map.addSource(
+            "coverage-result",
+            {
+              type: "geojson",
+              data: coverageFeature,
+            },
+          );
 
           map.addLayer({
             id: "coverage-fill",
             type: "fill",
             source: "coverage-result",
+
             paint: {
-              "fill-color": "#7c3aed",
-              "fill-opacity": 0.35,
+              "fill-color":
+                "#7c3aed",
+
+              "fill-opacity":
+                0.35,
             },
           });
 
@@ -154,9 +201,13 @@ export default function CoverageMap({
             id: "coverage-outline",
             type: "line",
             source: "coverage-result",
+
             paint: {
-              "line-color": "#4c1d95",
-              "line-width": 3,
+              "line-color":
+                "#4c1d95",
+
+              "line-width":
+                3,
             },
           });
         }
@@ -166,12 +217,16 @@ export default function CoverageMap({
 
         function extendBounds(
           coordinates: unknown,
-        ) {
+        ): void {
           if (
-            Array.isArray(coordinates) &&
+            Array.isArray(
+              coordinates,
+            ) &&
             coordinates.length >= 2 &&
-            typeof coordinates[0] === "number" &&
-            typeof coordinates[1] === "number"
+            typeof coordinates[0] ===
+              "number" &&
+            typeof coordinates[1] ===
+              "number"
           ) {
             bounds.extend([
               coordinates[0],
@@ -181,52 +236,74 @@ export default function CoverageMap({
             return;
           }
 
-          if (Array.isArray(coordinates)) {
-            coordinates.forEach(extendBounds);
+          if (
+            Array.isArray(
+              coordinates,
+            )
+          ) {
+            coordinates.forEach(
+              extendBounds,
+            );
           }
         }
 
         if (
           "coordinates" in
-          data.coverageRun.coverage_geometry
+          data.coverageRun
+            .coverage_geometry
         ) {
           extendBounds(
-            data.coverageRun.coverage_geometry
+            data.coverageRun
+              .coverage_geometry
               .coordinates,
           );
         }
 
         if (!bounds.isEmpty()) {
-          map.fitBounds(bounds, {
-            padding: 40,
-            maxZoom: 10,
-          });
+          map.fitBounds(
+            bounds,
+            {
+              padding: 40,
+              maxZoom: 10,
+            },
+          );
         }
       } catch (error) {
+        if (
+          abortController.signal
+            .aborted
+        ) {
+          return;
+        }
+
         console.error(
-          "Coverage map polling failed:",
+          "Coverage map load failed:",
           error,
         );
       }
     }
 
-    map.once("load", () => {
-      loadCoverage();
-
-      intervalId = window.setInterval(
-        loadCoverage,
-        POLL_INTERVAL_MS,
-      );
-    });
+    /*
+     * Load the completed geometry once when the map is ready.
+     *
+     * The previous implementation polled every three seconds,
+     * which repeatedly transferred the full multi-megabyte
+     * coverage geometry.
+     */
+    map.once(
+      "load",
+      () => {
+        void loadCoverage();
+      },
+    );
 
     return () => {
       isActive = false;
 
-      if (intervalId !== null) {
-        window.clearInterval(intervalId);
-      }
+      abortController.abort();
 
       marker.remove();
+
       map.remove();
     };
   }, [
