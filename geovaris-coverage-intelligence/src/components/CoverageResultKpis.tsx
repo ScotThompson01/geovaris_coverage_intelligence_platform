@@ -22,43 +22,62 @@ type CoverageRunResponse = {
 };
 
 const METERS_PER_MILE = 1609.344;
-const SQUARE_METERS_PER_SQUARE_MILE = 2_589_988.110336;
+
+const SQUARE_METERS_PER_SQUARE_MILE =
+  2_589_988.110336;
+
 const POLL_INTERVAL_MS = 3000;
+
+const RAPID_COVERAGE_MODEL =
+  "rapid_coverage";
+
+const RAPID_COVERAGE_METHODOLOGY =
+  "Terrain/Clutter LOS + Free-Space Link Budget";
 
 export default function CoverageResultKpis({
   scenarioId,
 }: CoverageResultKpisProps) {
   const [coverageRun, setCoverageRun] =
-    useState<CoverageRun | null>(null);
+    useState<CoverageRun | null>(
+      null,
+    );
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
 
   useEffect(() => {
     let isActive = true;
 
-    async function loadCoverageResult() {
+    async function loadCoverageResult(): Promise<void> {
       try {
-        const response = await fetch(
-          `/api/coverage-runs/latest?scenarioId=${encodeURIComponent(
-            scenarioId,
-          )}`,
-          {
-            cache: "no-store",
-          },
-        );
+        const response =
+          await fetch(
+            `/api/coverage-runs/latest?scenarioId=${encodeURIComponent(
+              scenarioId,
+            )}`,
+            {
+              cache: "no-store",
+            },
+          );
 
         const data =
           (await response.json()) as CoverageRunResponse;
 
         if (!response.ok) {
           throw new Error(
-            data.error ?? "Unable to load coverage result.",
+            data.error ??
+              "Unable to load coverage result.",
           );
         }
 
         if (isActive) {
-          setCoverageRun(data.coverageRun);
+          setCoverageRun(
+            data.coverageRun,
+          );
+
           setError("");
           setIsLoading(false);
         }
@@ -80,18 +99,26 @@ export default function CoverageResultKpis({
       }
     }
 
-    loadCoverageResult();
+    void loadCoverageResult();
 
-    const intervalId = window.setInterval(
-      loadCoverageResult,
-      POLL_INTERVAL_MS,
-    );
+    const intervalId =
+      window.setInterval(
+        () => {
+          void loadCoverageResult();
+        },
+        POLL_INTERVAL_MS,
+      );
 
     return () => {
       isActive = false;
-      window.clearInterval(intervalId);
+
+      window.clearInterval(
+        intervalId,
+      );
     };
-  }, [scenarioId]);
+  }, [
+    scenarioId,
+  ]);
 
   if (isLoading) {
     return (
@@ -128,14 +155,20 @@ export default function CoverageResultKpis({
     );
   }
 
+  const isRapidCoverage =
+    coverageRun.propagation_model ===
+    RAPID_COVERAGE_MODEL;
+
   const radiusMiles =
-    coverageRun.estimated_coverage_radius_m === null
+    coverageRun.estimated_coverage_radius_m ===
+    null
       ? null
       : coverageRun.estimated_coverage_radius_m /
         METERS_PER_MILE;
 
   const areaSquareMiles =
-    coverageRun.coverage_area_sq_m === null
+    coverageRun.coverage_area_sq_m ===
+    null
       ? null
       : coverageRun.coverage_area_sq_m /
         SQUARE_METERS_PER_SQUARE_MILE;
@@ -177,17 +210,10 @@ export default function CoverageResultKpis({
         />
 
         <ResultCard
-          label="Estimated Radius"
-          value={
-            radiusMiles === null
-              ? "—"
-              : `${radiusMiles.toFixed(1)} mi`
-          }
-        />
-
-        <ResultCard
           label="Run Status"
-          value={formatStatus(coverageRun.status)}
+          value={formatStatus(
+            coverageRun.status,
+          )}
         />
 
         <ResultCard
@@ -195,15 +221,46 @@ export default function CoverageResultKpis({
           value={
             processingTime === null
               ? "—"
-              : `${processingTime.toFixed(3)} sec`
+              : `${processingTime.toFixed(
+                  3,
+                )} sec`
           }
         />
+
+        {isRapidCoverage ? (
+          <ResultCard
+            label="Methodology"
+            value={
+              RAPID_COVERAGE_METHODOLOGY
+            }
+            compact
+          />
+        ) : (
+          <ResultCard
+            label="Estimated Radius"
+            value={
+              radiusMiles === null
+                ? "—"
+                : `${radiusMiles.toFixed(
+                    1,
+                  )} mi`
+            }
+          />
+        )}
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
-        Current results use the free-space development model and do not
-        represent terrain-aware or guaranteed service coverage.
-      </p>
+      {isRapidCoverage ? (
+        <p className="mt-3 text-xs text-slate-500">
+          Rapid Coverage is an engineering estimate based on
+          terrain/clutter line-of-sight and a free-space link budget.
+          It does not guarantee actual service availability.
+        </p>
+      ) : (
+        <p className="mt-3 text-xs text-slate-500">
+          Coverage results are engineering estimates and do not
+          guarantee actual service availability.
+        </p>
+      )}
     </div>
   );
 }
@@ -211,11 +268,13 @@ export default function CoverageResultKpis({
 type ResultCardProps = {
   label: string;
   value: string;
+  compact?: boolean;
 };
 
 function ResultCard({
   label,
   value,
+  compact = false,
 }: ResultCardProps) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -223,20 +282,32 @@ function ResultCard({
         {label}
       </p>
 
-      <p className="mt-2 text-2xl font-semibold text-slate-900">
+      <p
+        className={
+          compact
+            ? "mt-2 text-base font-semibold leading-snug text-slate-900"
+            : "mt-2 text-2xl font-semibold text-slate-900"
+        }
+      >
         {value}
       </p>
     </div>
   );
 }
 
-function formatStatus(status: string) {
+function formatStatus(
+  status: string,
+): string {
   return status
     .split("_")
     .map(
       (word) =>
-        word.charAt(0).toUpperCase() +
-        word.slice(1),
+        word.charAt(
+          0,
+        ).toUpperCase() +
+        word.slice(
+          1,
+        ),
     )
     .join(" ");
 }

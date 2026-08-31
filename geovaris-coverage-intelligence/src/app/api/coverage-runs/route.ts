@@ -4,6 +4,24 @@ import { sql } from "@/lib/db";
 
 const FREE_SPACE_MODEL = "free_space_test";
 const NTIA_ITM_MODEL = "ntia_itm";
+const RAPID_COVERAGE_MODEL = "rapid_coverage";
+
+const RAPID_COVERAGE_MODEL_VERSION =
+  "demo-2026.1";
+
+const RAPID_COVERAGE_RESOLUTION_M = 30;
+
+const RAPID_CLUTTER_SOURCE =
+  "USGS/MRLC Annual NLCD Land Cover";
+
+const RAPID_CLUTTER_VERSION =
+  "2025 C1V2";
+
+const RAPID_CLUTTER_MODEL =
+  "GeoVaris Default Clutter Height Profile";
+
+const RAPID_CLUTTER_MODEL_VERSION =
+  "2026.1-demo";
 
 const P2108_CLUTTER_MODEL =
   "ITU-R P.2108 Terrestrial Statistical Clutter";
@@ -15,6 +33,7 @@ const P2108_CORRECTION_END = "receiver";
 
 type CreateCoverageRunRequest = {
   scenarioId?: string;
+  runMethod?: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -23,6 +42,10 @@ export async function POST(request: NextRequest) {
       (await request.json()) as CreateCoverageRunRequest;
 
     const scenarioId = body.scenarioId;
+
+    const runMethod =
+      body.runMethod?.trim() ??
+      null;
 
     if (!scenarioId) {
       return NextResponse.json(
@@ -35,12 +58,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (
+      runMethod !== null &&
+      runMethod !== RAPID_COVERAGE_MODEL
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Unsupported coverage run method.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
     /*
      * Resolve ownership, RF inputs, site coordinates,
      * propagation assumptions, clutter assumptions,
      * and governed dataset lineage on the server.
      *
-     * The browser supplies only the scenario ID.
+     * The browser supplies only the scenario ID and,
+     * optionally, the requested run methodology.
      *
      * customer_id and all calculation parameters are
      * copied directly from the database so the coverage
@@ -116,6 +155,177 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /*
+     * Rapid Coverage is a distinct calculation methodology.
+     *
+     * The saved scenario remains the engineering-input record,
+     * while the coverage run snapshots the actual method used
+     * for this calculation.
+     *
+     * Rapid Coverage uses:
+     *
+     * - 30 m working resolution
+     * - governed NLCD land-cover lineage
+     * - governed GeoVaris clutter-height profile
+     * - no ITM assumptions
+     * - no P.2108 statistical clutter correction
+     */
+    if (
+      runMethod === RAPID_COVERAGE_MODEL
+    ) {
+      const runs = await sql`
+        INSERT INTO coverage_runs (
+          customer_id,
+          scenario_id,
+          status,
+
+          site_latitude,
+          site_longitude,
+          site_ground_elevation_m,
+
+          frequency_mhz,
+          eirp_watts,
+
+          antenna_height_m,
+          antenna_gain_dbi,
+
+          receiver_height_m,
+          receiver_threshold_dbm,
+
+          calculation_radius_m,
+          resolution_m,
+
+          propagation_model,
+          propagation_model_version,
+
+          itm_climate,
+          itm_polarization,
+          itm_variability_mode,
+          itm_surface_refractivity,
+          itm_dielectric_constant,
+          itm_conductivity_s_per_m,
+          itm_confidence,
+          itm_reliability,
+
+          clutter_source,
+          clutter_version,
+          clutter_model,
+          clutter_model_version,
+          clutter_percentage_locations,
+          clutter_correction_end,
+
+          dem_source,
+          dem_version,
+          dem_horizontal_crs,
+          dem_vertical_datum,
+          dem_units,
+          dem_resolution_m
+        )
+        VALUES (
+          ${scenario.customer_id},
+          ${scenario.scenario_id},
+          'pending',
+
+          ${scenario.site_latitude},
+          ${scenario.site_longitude},
+          ${scenario.ground_elevation_m},
+
+          ${scenario.frequency_mhz},
+          ${scenario.eirp_watts},
+
+          ${scenario.antenna_height_m},
+          ${scenario.antenna_gain_dbi},
+
+          ${scenario.receiver_height_m},
+          ${scenario.receiver_threshold_dbm},
+
+          ${scenario.calculation_radius_m},
+          ${RAPID_COVERAGE_RESOLUTION_M},
+
+          ${RAPID_COVERAGE_MODEL},
+          ${RAPID_COVERAGE_MODEL_VERSION},
+
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+
+          ${RAPID_CLUTTER_SOURCE},
+          ${RAPID_CLUTTER_VERSION},
+          ${RAPID_CLUTTER_MODEL},
+          ${RAPID_CLUTTER_MODEL_VERSION},
+          NULL,
+          NULL,
+
+          ${scenario.ground_elevation_source},
+          ${scenario.ground_elevation_version},
+          ${scenario.ground_elevation_horizontal_crs},
+          ${scenario.ground_elevation_vertical_datum},
+          ${scenario.ground_elevation_units},
+          ${scenario.ground_elevation_resolution_m}
+        )
+
+        RETURNING
+          id,
+          customer_id,
+          scenario_id,
+          status,
+
+          site_latitude,
+          site_longitude,
+
+          frequency_mhz,
+          eirp_watts,
+
+          antenna_height_m,
+          antenna_gain_dbi,
+
+          receiver_height_m,
+          receiver_threshold_dbm,
+
+          calculation_radius_m,
+          resolution_m,
+
+          propagation_model,
+          propagation_model_version,
+
+          clutter_source,
+          clutter_version,
+          clutter_model,
+          clutter_model_version,
+
+          dem_source,
+          dem_version,
+          dem_horizontal_crs,
+          dem_vertical_datum,
+          dem_units,
+          dem_resolution_m,
+
+          created_at;
+      `;
+
+      return NextResponse.json(
+        {
+          status: "ok",
+          coverageRun:
+            runs[0],
+        },
+        {
+          status: 201,
+        },
+      );
+    }
+
+    /*
+     * Existing Free Space / NTIA ITM path.
+     *
+     * This remains unchanged for requests that do not
+     * explicitly request Rapid Coverage.
+     */
     let propagationModelVersion: string;
 
     if (
