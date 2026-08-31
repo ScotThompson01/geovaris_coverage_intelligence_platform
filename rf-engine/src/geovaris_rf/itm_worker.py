@@ -10,6 +10,10 @@ Processes one pending ``ntia_itm`` coverage run using:
 - the validated NTIA ITM 1.4 native library
 - GeoVaris coverage-grid, GeoTIFF, and GeoJSON pipelines
 
+For development/testing, GEOVARIS_COVERAGE_RUN_ID may be set to
+explicitly select one pending NTIA ITM coverage run. When it is not set,
+the oldest pending NTIA ITM run is processed.
+
 This is an MVP development worker. It is not yet the final production
 job-queue or object-storage implementation.
 
@@ -85,6 +89,10 @@ OUTPUT_ROOT_ENVIRONMENT_VARIABLE = (
     "GEOVARIS_COVERAGE_OUTPUT_DIR"
 )
 
+RUN_ID_ENVIRONMENT_VARIABLE = (
+    "GEOVARIS_COVERAGE_RUN_ID"
+)
+
 DEFAULT_OUTPUT_ROOT = Path(
     "rf-engine/data/coverage"
 )
@@ -104,6 +112,21 @@ def get_database_url() -> str:
         )
 
     return database_url
+
+
+def get_requested_run_id() -> str | None:
+    """Return an optional explicitly requested coverage run ID."""
+
+    value = os.getenv(
+        RUN_ID_ENVIRONMENT_VARIABLE
+    )
+
+    if value is None:
+        return None
+
+    value = value.strip()
+
+    return value or None
 
 
 def _resolve_required_file(
@@ -289,76 +312,151 @@ def _terrain_sample_spacing_m(
 def claim_pending_itm_run(
     connection: psycopg.Connection,
 ) -> dict[str, Any] | None:
-    """Claim the oldest pending NTIA ITM coverage run."""
+    """Claim one pending NTIA ITM coverage run.
+
+    When GEOVARIS_COVERAGE_RUN_ID is configured, only that pending
+    NTIA ITM run is eligible. Otherwise the oldest pending NTIA ITM
+    run is claimed.
+    """
+
+    requested_run_id = (
+        get_requested_run_id()
+    )
 
     with connection.transaction():
         with connection.cursor(
             row_factory=dict_row
         ) as cursor:
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    customer_id,
-                    scenario_id,
+            if requested_run_id is None:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        customer_id,
+                        scenario_id,
 
-                    site_latitude,
-                    site_longitude,
-                    site_ground_elevation_m,
+                        site_latitude,
+                        site_longitude,
+                        site_ground_elevation_m,
 
-                    frequency_mhz,
-                    eirp_watts,
+                        frequency_mhz,
+                        eirp_watts,
 
-                    antenna_height_m,
-                    antenna_gain_dbi,
+                        antenna_height_m,
+                        antenna_gain_dbi,
 
-                    receiver_height_m,
-                    receiver_threshold_dbm,
+                        receiver_height_m,
+                        receiver_threshold_dbm,
 
-                    calculation_radius_m,
-                    resolution_m,
+                        calculation_radius_m,
+                        resolution_m,
 
-                    propagation_model,
-                    propagation_model_version,
+                        propagation_model,
+                        propagation_model_version,
 
-                    itm_climate,
-                    itm_polarization,
-                    itm_variability_mode,
-                    itm_surface_refractivity,
-                    itm_dielectric_constant,
-                    itm_conductivity_s_per_m,
-                    itm_confidence,
-                    itm_reliability,
+                        itm_climate,
+                        itm_polarization,
+                        itm_variability_mode,
+                        itm_surface_refractivity,
+                        itm_dielectric_constant,
+                        itm_conductivity_s_per_m,
+                        itm_confidence,
+                        itm_reliability,
 
-                    clutter_source,
-                    clutter_version,
-                    clutter_model,
-                    clutter_model_version,
-                    clutter_percentage_locations,
-                    clutter_correction_end,
+                        clutter_source,
+                        clutter_version,
+                        clutter_model,
+                        clutter_model_version,
+                        clutter_percentage_locations,
+                        clutter_correction_end,
 
-                    dem_source,
-                    dem_version,
-                    dem_horizontal_crs,
-                    dem_vertical_datum,
-                    dem_units,
-                    dem_resolution_m
+                        dem_source,
+                        dem_version,
+                        dem_horizontal_crs,
+                        dem_vertical_datum,
+                        dem_units,
+                        dem_resolution_m
 
-                FROM coverage_runs
+                    FROM coverage_runs
 
-                WHERE status = 'pending'
-                  AND propagation_model = %s
+                    WHERE status = 'pending'
+                      AND propagation_model = %s
 
-                ORDER BY created_at
+                    ORDER BY created_at
 
-                FOR UPDATE SKIP LOCKED
+                    FOR UPDATE SKIP LOCKED
 
-                LIMIT 1;
-                """,
-                (
-                    PROPAGATION_MODEL,
-                ),
-            )
+                    LIMIT 1;
+                    """,
+                    (
+                        PROPAGATION_MODEL,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        customer_id,
+                        scenario_id,
+
+                        site_latitude,
+                        site_longitude,
+                        site_ground_elevation_m,
+
+                        frequency_mhz,
+                        eirp_watts,
+
+                        antenna_height_m,
+                        antenna_gain_dbi,
+
+                        receiver_height_m,
+                        receiver_threshold_dbm,
+
+                        calculation_radius_m,
+                        resolution_m,
+
+                        propagation_model,
+                        propagation_model_version,
+
+                        itm_climate,
+                        itm_polarization,
+                        itm_variability_mode,
+                        itm_surface_refractivity,
+                        itm_dielectric_constant,
+                        itm_conductivity_s_per_m,
+                        itm_confidence,
+                        itm_reliability,
+
+                        clutter_source,
+                        clutter_version,
+                        clutter_model,
+                        clutter_model_version,
+                        clutter_percentage_locations,
+                        clutter_correction_end,
+
+                        dem_source,
+                        dem_version,
+                        dem_horizontal_crs,
+                        dem_vertical_datum,
+                        dem_units,
+                        dem_resolution_m
+
+                    FROM coverage_runs
+
+                    WHERE id = %s
+                      AND status = 'pending'
+                      AND propagation_model = %s
+
+                    FOR UPDATE SKIP LOCKED
+
+                    LIMIT 1;
+                    """,
+                    (
+                        requested_run_id,
+                        PROPAGATION_MODEL,
+                    ),
+                )
 
             coverage_run = (
                 cursor.fetchone()
@@ -852,6 +950,16 @@ def process_one_itm_run() -> bool:
         get_output_root()
     )
 
+    requested_run_id = (
+        get_requested_run_id()
+    )
+
+    if requested_run_id is not None:
+        print(
+            "Requested coverage run: "
+            f"{requested_run_id}"
+        )
+
     with psycopg.connect(
         database_url
     ) as connection:
@@ -862,9 +970,17 @@ def process_one_itm_run() -> bool:
         )
 
         if coverage_run is None:
-            print(
-                "No pending ntia_itm coverage runs found."
-            )
+            if requested_run_id is None:
+                print(
+                    "No pending ntia_itm coverage runs found."
+                )
+            else:
+                print(
+                    "Requested coverage run was not found, "
+                    "is not pending, or is not an ntia_itm run: "
+                    f"{requested_run_id}"
+                )
+
             return False
 
         run_id = (
@@ -1130,13 +1246,16 @@ def process_one_itm_run() -> bool:
             print(
                 f"Completed NTIA ITM run {run_id}"
             )
+
             print(
                 f"Grid: {grid.width} x {grid.height}"
             )
+
             print(
                 "Propagation cells: "
                 f"{propagation_cell_count}"
             )
+
             print(
                 "Terrain sample spacing: "
                 f"{terrain_sample_spacing_m:.2f} m"
@@ -1148,15 +1267,18 @@ def process_one_itm_run() -> bool:
                     f"{coverage_run['clutter_source']} "
                     f"{coverage_run['clutter_version']}"
                 )
+
                 print(
                     "Clutter model: "
                     f"{coverage_run['clutter_model']} "
                     f"{coverage_run['clutter_model_version']}"
                 )
+
                 print(
                     "Clutter percentage locations: "
                     f"{clutter_percentage_locations:.2f}"
                 )
+
                 print(
                     "Clutter correction end: "
                     f"{coverage_run['clutter_correction_end']}"
@@ -1165,9 +1287,11 @@ def process_one_itm_run() -> bool:
             print(
                 f"GeoTIFF: {raster_path.resolve()}"
             )
+
             print(
                 f"GeoJSON: {geojson_path.resolve()}"
             )
+
             print(
                 "Processing time: "
                 f"{processing_time_seconds:.2f} s"
