@@ -46,6 +46,15 @@ export async function GET(
                     cr.receiver_threshold_dbm,
                     cr.propagation_model,
 
+                    cr.covered_population::double precision
+                        AS covered_population,
+
+                    cr.census_vintage,
+                    cr.population_dataset_source,
+                    cr.population_dataset_version,
+                    cr.population_allocation_method,
+                    cr.population_geometry_basis,
+
                     ST_AsGeoJSON(
                         ST_ForcePolygonCCW(
                             cr.coverage_geometry
@@ -97,6 +106,16 @@ export async function GET(
                 cr.antenna_height_m,
                 cr.receiver_threshold_dbm,
                 cr.propagation_model,
+
+                cr.covered_population::double precision
+                    AS covered_population,
+
+                cr.census_vintage,
+                cr.population_dataset_source,
+                cr.population_dataset_version,
+                cr.population_allocation_method,
+                cr.population_geometry_basis,
+
                 s.name AS site_name
 
             FROM coverage_runs cr

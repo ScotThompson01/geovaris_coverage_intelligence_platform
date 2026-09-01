@@ -13,6 +13,7 @@ Processes one pending ``rapid_coverage`` coverage run using:
 - display-filtered GeoJSON
 - stable coverage artifact paths
 - PostGIS run completion
+- PostGIS population analytics during run completion
 
 For development/testing, GEOVARIS_COVERAGE_RUN_ID may be set to
 explicitly select one pending Rapid Coverage run. When it is not set,
@@ -97,6 +98,30 @@ RAPID_CLUTTER_SOURCE = (
 
 RAPID_CLUTTER_VERSION = (
     "2025 C1V2"
+)
+
+RAPID_DEM_SOURCE = (
+    "GeoVaris TEST-002 working DEM"
+)
+
+RAPID_DEM_VERSION = (
+    "test002_60km_30m_utm17"
+)
+
+RAPID_DEM_HORIZONTAL_CRS = (
+    "EPSG:32617"
+)
+
+RAPID_DEM_VERTICAL_DATUM = (
+    "unknown"
+)
+
+RAPID_DEM_UNITS = (
+    "m"
+)
+
+RAPID_DEM_RESOLUTION_M = (
+    30.0
 )
 
 
@@ -368,6 +393,89 @@ def claim_pending_rapid_run(
             )
 
 
+def snapshot_rapid_dem_lineage(
+    connection: psycopg.Connection,
+    *,
+    coverage_run: dict[str, Any],
+) -> None:
+    """Snapshot governed Rapid DEM lineage onto a coverage run.
+
+    The current development worker uses the explicitly governed
+    TEST-002 working DEM. These values describe that working raster
+    without claiming an upstream source/version that has not yet
+    been verified.
+
+    The in-memory immutable run snapshot is updated at the same time
+    as the database record so later validation and logging use the
+    same lineage values.
+    """
+
+    run_id = coverage_run.get(
+        "id"
+    )
+
+    if run_id is None:
+        raise ValueError(
+            "Coverage run is missing required field: id"
+        )
+
+    coverage_run[
+        "dem_source"
+    ] = RAPID_DEM_SOURCE
+
+    coverage_run[
+        "dem_version"
+    ] = RAPID_DEM_VERSION
+
+    coverage_run[
+        "dem_horizontal_crs"
+    ] = RAPID_DEM_HORIZONTAL_CRS
+
+    coverage_run[
+        "dem_vertical_datum"
+    ] = RAPID_DEM_VERTICAL_DATUM
+
+    coverage_run[
+        "dem_units"
+    ] = RAPID_DEM_UNITS
+
+    coverage_run[
+        "dem_resolution_m"
+    ] = RAPID_DEM_RESOLUTION_M
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE coverage_runs
+            SET
+                dem_source = %s,
+                dem_version = %s,
+                dem_horizontal_crs = %s,
+                dem_vertical_datum = %s,
+                dem_units = %s,
+                dem_resolution_m = %s
+            WHERE id = %s;
+            """,
+            (
+                RAPID_DEM_SOURCE,
+                RAPID_DEM_VERSION,
+                RAPID_DEM_HORIZONTAL_CRS,
+                RAPID_DEM_VERTICAL_DATUM,
+                RAPID_DEM_UNITS,
+                RAPID_DEM_RESOLUTION_M,
+                run_id,
+            ),
+        )
+
+        if cursor.rowcount != 1:
+            raise RuntimeError(
+                "Rapid Coverage DEM lineage could not be "
+                "snapshotted to the coverage run."
+            )
+
+    connection.commit()
+
+
 def _validate_positive_number(
     coverage_run: dict[str, Any],
     *,
@@ -585,6 +693,79 @@ def _validate_run(
             f"{coverage_run.get('clutter_model_version')!r}."
         )
 
+    if (
+        coverage_run.get(
+            "dem_source"
+        )
+        != RAPID_DEM_SOURCE
+    ):
+        raise ValueError(
+            "Unsupported Rapid Coverage DEM source: "
+            f"{coverage_run.get('dem_source')!r}."
+        )
+
+    if (
+        coverage_run.get(
+            "dem_version"
+        )
+        != RAPID_DEM_VERSION
+    ):
+        raise ValueError(
+            "Unsupported Rapid Coverage DEM version: "
+            f"{coverage_run.get('dem_version')!r}."
+        )
+
+    if (
+        coverage_run.get(
+            "dem_horizontal_crs"
+        )
+        != RAPID_DEM_HORIZONTAL_CRS
+    ):
+        raise ValueError(
+            "Unsupported Rapid Coverage DEM horizontal CRS: "
+            f"{coverage_run.get('dem_horizontal_crs')!r}."
+        )
+
+    if (
+        coverage_run.get(
+            "dem_vertical_datum"
+        )
+        != RAPID_DEM_VERTICAL_DATUM
+    ):
+        raise ValueError(
+            "Unsupported Rapid Coverage DEM vertical datum: "
+            f"{coverage_run.get('dem_vertical_datum')!r}."
+        )
+
+    if (
+        coverage_run.get(
+            "dem_units"
+        )
+        != RAPID_DEM_UNITS
+    ):
+        raise ValueError(
+            "Unsupported Rapid Coverage DEM units: "
+            f"{coverage_run.get('dem_units')!r}."
+        )
+
+    dem_resolution_m = (
+        _validate_positive_number(
+            coverage_run,
+            field_name="dem_resolution_m",
+        )
+    )
+
+    if not math.isclose(
+        dem_resolution_m,
+        RAPID_DEM_RESOLUTION_M,
+        rel_tol=0.0,
+        abs_tol=1e-9,
+    ):
+        raise ValueError(
+            "Rapid Coverage development DEM must have "
+            f"{RAPID_DEM_RESOLUTION_M:.0f} m resolution."
+        )
+
     itm_fields = (
         "itm_climate",
         "itm_polarization",
@@ -732,6 +913,15 @@ def process_one_rapid_run() -> bool:
         )
 
         try:
+            print(
+                "Snapshotting Rapid DEM lineage..."
+            )
+
+            snapshot_rapid_dem_lineage(
+                connection,
+                coverage_run=coverage_run,
+            )
+
             _validate_run(
                 coverage_run
             )
@@ -923,7 +1113,8 @@ def process_one_rapid_run() -> bool:
             )
 
             print(
-                "Dissolving display geometry in PostGIS..."
+                "Dissolving display geometry "
+                "and calculating population in PostGIS..."
             )
 
             complete_rapid_run(
@@ -999,6 +1190,16 @@ def process_one_rapid_run() -> bool:
                 "Clutter profile: "
                 f"{clutter_profile.name} "
                 f"{clutter_profile.version}"
+            )
+
+            print(
+                "DEM lineage: "
+                f"{coverage_run['dem_source']} / "
+                f"{coverage_run['dem_version']} / "
+                f"{coverage_run['dem_horizontal_crs']} / "
+                f"{coverage_run['dem_vertical_datum']} / "
+                f"{coverage_run['dem_units']} / "
+                f"{float(coverage_run['dem_resolution_m']):.0f} m"
             )
 
             print(

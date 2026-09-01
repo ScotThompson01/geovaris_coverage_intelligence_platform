@@ -7,6 +7,12 @@ from unittest.mock import MagicMock, patch
 from geovaris_rf.rapid_worker import (
     RAPID_CLUTTER_SOURCE,
     RAPID_CLUTTER_VERSION,
+    RAPID_DEM_HORIZONTAL_CRS,
+    RAPID_DEM_RESOLUTION_M,
+    RAPID_DEM_SOURCE,
+    RAPID_DEM_UNITS,
+    RAPID_DEM_VERSION,
+    RAPID_DEM_VERTICAL_DATUM,
     RAPID_RESOLUTION_M,
     _resolve_required_file,
     _validate_run,
@@ -81,12 +87,12 @@ class RapidWorkerTests(
             "clutter_percentage_locations": None,
             "clutter_correction_end": None,
 
-            "dem_source": "test DEM",
-            "dem_version": "demo",
-            "dem_horizontal_crs": "EPSG:32617",
-            "dem_vertical_datum": "unknown",
-            "dem_units": "m",
-            "dem_resolution_m": 30.0,
+            "dem_source": RAPID_DEM_SOURCE,
+            "dem_version": RAPID_DEM_VERSION,
+            "dem_horizontal_crs": RAPID_DEM_HORIZONTAL_CRS,
+            "dem_vertical_datum": RAPID_DEM_VERTICAL_DATUM,
+            "dem_units": RAPID_DEM_UNITS,
+            "dem_resolution_m": RAPID_DEM_RESOLUTION_M,
         }
 
     def test_valid_run_is_accepted(

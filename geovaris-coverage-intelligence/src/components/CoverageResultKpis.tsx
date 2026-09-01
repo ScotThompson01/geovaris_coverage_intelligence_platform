@@ -22,6 +22,24 @@ type CoverageRun = {
         | number
         | null;
     propagation_model: string;
+    covered_population:
+        | number
+        | null;
+    census_vintage:
+        | string
+        | null;
+    population_dataset_source:
+        | string
+        | null;
+    population_dataset_version:
+        | string
+        | null;
+    population_allocation_method:
+        | string
+        | null;
+    population_geometry_basis:
+        | string
+        | null;
 };
 
 type CoverageRunResponse = {
@@ -44,6 +62,12 @@ const RAPID_COVERAGE_MODEL =
 
 const RAPID_COVERAGE_METHODOLOGY =
     "Terrain/Clutter LOS + Free-Space Link Budget";
+
+const POPULATION_ALLOCATION_METHOD =
+    "block_area_weighted";
+
+const POPULATION_GEOMETRY_BASIS =
+    "display_geometry";
 
 export default function CoverageResultKpis({
     scenarioId,
@@ -213,6 +237,16 @@ export default function CoverageResultKpis({
     const processingTime =
         coverageRun.processing_time_seconds;
 
+    const hasPopulationEstimate =
+        coverageRun.covered_population !==
+        null;
+
+    const usesCurrentPopulationMethod =
+        coverageRun.population_allocation_method ===
+            POPULATION_ALLOCATION_METHOD &&
+        coverageRun.population_geometry_basis ===
+            POPULATION_GEOMETRY_BASIS;
+
     return (
         <div>
             <div className="mb-4 flex items-end justify-between">
@@ -231,7 +265,7 @@ export default function CoverageResultKpis({
                 </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <ResultCard
                     label="Coverage Area"
                     value={
@@ -244,6 +278,18 @@ export default function CoverageResultKpis({
                                       maximumFractionDigits: 1,
                                   },
                               )} mi²`
+                    }
+                />
+
+                <ResultCard
+                    label="Estimated Population Covered"
+                    value={
+                        coverageRun.covered_population ===
+                        null
+                            ? "—"
+                            : Math.round(
+                                  coverageRun.covered_population,
+                              ).toLocaleString()
                     }
                 />
 
@@ -289,14 +335,29 @@ export default function CoverageResultKpis({
                 )}
             </div>
 
-            {isRapidCoverage ? (
+            {hasPopulationEstimate ? (
                 <p className="mt-3 text-xs text-slate-500">
+                    Estimated population coverage uses{" "}
+                    {coverageRun.census_vintage ??
+                        "the recorded"}{" "}
+                    Census block population
+                    {usesCurrentPopulationMethod
+                        ? ", area-weighted by the portion of each block intersecting the stored coverage display geometry."
+                        : "."}
+                    {" "}
+                    Population coverage is an estimate and does not represent
+                    confirmed service to individual people or locations.
+                </p>
+            ) : null}
+
+            {isRapidCoverage ? (
+                <p className="mt-2 text-xs text-slate-500">
                     Rapid Coverage is an engineering estimate based on
                     terrain/clutter line-of-sight and a free-space link budget.
                     It does not guarantee actual service availability.
                 </p>
             ) : (
-                <p className="mt-3 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-slate-500">
                     Coverage results are engineering estimates and do not
                     guarantee actual service availability.
                 </p>
