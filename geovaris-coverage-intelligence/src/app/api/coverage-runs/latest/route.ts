@@ -3,12 +3,36 @@ import {
     NextResponse,
 } from "next/server";
 
+import {
+    getGeoVarisAuthContext,
+} from "@/lib/auth-context";
+
 import { sql } from "@/lib/db";
+
+import {
+    isUuid,
+} from "@/lib/validation";
 
 export async function GET(
     request: NextRequest,
 ) {
     try {
+        const authContext =
+            await getGeoVarisAuthContext();
+
+        if (!authContext) {
+            return NextResponse.json(
+                {
+                    status: "error",
+                    error:
+                        "Authentication is required.",
+                },
+                {
+                    status: 401,
+                },
+            );
+        }
+
         const scenarioId =
             request.nextUrl.searchParams.get(
                 "scenarioId",
@@ -27,13 +51,187 @@ export async function GET(
             );
         }
 
+        if (!isUuid(scenarioId)) {
+            return NextResponse.json(
+                {
+                    status: "error",
+                    error:
+                        "Scenario ID must be a valid UUID.",
+                },
+                {
+                    status: 400,
+                },
+            );
+        }
+
         const includeGeometry =
             request.nextUrl.searchParams.get(
                 "includeGeometry",
             ) !== "false";
 
+        let authorizedScenarioRows;
+
+        if (
+            authContext.isGeoVarisAdmin
+        ) {
+            authorizedScenarioRows =
+                await sql`
+                    SELECT
+                        id,
+                        customer_id
+
+                    FROM scenarios
+
+                    WHERE id =
+                        ${scenarioId}
+
+                    LIMIT 1;
+                `;
+        } else {
+            const readableCustomerIds =
+                authContext.customerMemberships.map(
+                    (membership) =>
+                        membership.customerId,
+                );
+
+            if (
+                readableCustomerIds.length === 0
+            ) {
+                return NextResponse.json(
+                    {
+                        status: "error",
+                        error:
+                            "Scenario was not found.",
+                    },
+                    {
+                        status: 404,
+                    },
+                );
+            }
+
+            authorizedScenarioRows =
+                await sql`
+                    SELECT
+                        id,
+                        customer_id
+
+                    FROM scenarios
+
+                    WHERE id =
+                        ${scenarioId}
+
+                      AND customer_id =
+                        ANY(
+                            ${readableCustomerIds}::uuid[]
+                        )
+
+                    LIMIT 1;
+                `;
+        }
+
+        const authorizedScenario =
+            authorizedScenarioRows[0];
+
+        /*
+         * A nonexistent scenario and a scenario outside
+         * the caller's authorized tenant scope intentionally
+         * return the same response.
+         */
+        if (!authorizedScenario) {
+            return NextResponse.json(
+                {
+                    status: "error",
+                    error:
+                        "Scenario was not found.",
+                },
+                {
+                    status: 404,
+                },
+            );
+        }
+
         if (includeGeometry) {
-            const rows = await sql`
+            const rows =
+                await sql`
+                    SELECT
+                        cr.id,
+                        cr.status,
+                        cr.estimated_coverage_radius_m,
+                        cr.coverage_area_sq_m,
+                        cr.processing_time_seconds,
+                        cr.frequency_mhz,
+                        cr.eirp_watts,
+                        cr.antenna_height_m,
+                        cr.receiver_threshold_dbm,
+                        cr.propagation_model,
+
+                        cr.covered_population::double precision
+                            AS covered_population,
+
+                        cr.census_vintage,
+                        cr.population_dataset_source,
+                        cr.population_dataset_version,
+                        cr.population_allocation_method,
+                        cr.population_geometry_basis,
+
+                        cr.covered_fabric_locations::double precision
+                            AS covered_fabric_locations,
+
+                        cr.fabric_version,
+                        cr.fabric_dataset_source,
+                        cr.fabric_dataset_vintage,
+                        cr.fabric_geometry_basis,
+                        cr.fabric_calculated_at,
+
+                        ST_AsGeoJSON(
+                            ST_ForcePolygonCCW(
+                                cr.coverage_geometry
+                            )
+                        )::json AS coverage_geometry,
+
+                        s.name AS site_name
+
+                    FROM coverage_runs cr
+
+                    JOIN scenarios sc
+                        ON sc.id =
+                            cr.scenario_id
+                        AND sc.customer_id =
+                            cr.customer_id
+
+                    JOIN sites s
+                        ON s.id =
+                            sc.site_id
+                        AND s.customer_id =
+                            cr.customer_id
+
+                    WHERE cr.status =
+                        'completed'
+
+                      AND cr.coverage_geometry
+                        IS NOT NULL
+
+                      AND cr.scenario_id =
+                        ${scenarioId}
+
+                      AND cr.customer_id =
+                        ${authorizedScenario.customer_id}
+
+                    ORDER BY
+                        cr.completed_at DESC
+
+                    LIMIT 1;
+                `;
+
+            return NextResponse.json({
+                status: "ok",
+                coverageRun:
+                    rows[0] ?? null,
+            });
+        }
+
+        const rows =
+            await sql`
                 SELECT
                     cr.id,
                     cr.status,
@@ -64,101 +262,39 @@ export async function GET(
                     cr.fabric_geometry_basis,
                     cr.fabric_calculated_at,
 
-                    ST_AsGeoJSON(
-                        ST_ForcePolygonCCW(
-                            cr.coverage_geometry
-                        )
-                    )::json AS coverage_geometry,
-
                     s.name AS site_name
 
                 FROM coverage_runs cr
 
                 JOIN scenarios sc
-                    ON sc.id = cr.scenario_id
+                    ON sc.id =
+                        cr.scenario_id
                     AND sc.customer_id =
                         cr.customer_id
 
                 JOIN sites s
-                    ON s.id = sc.site_id
+                    ON s.id =
+                        sc.site_id
                     AND s.customer_id =
                         cr.customer_id
 
-                WHERE cr.status = 'completed'
-                    AND cr.coverage_geometry
-                        IS NOT NULL
-                    AND cr.scenario_id =
-                        ${scenarioId}
+                WHERE cr.status =
+                    'completed'
+
+                  AND cr.coverage_geometry
+                    IS NOT NULL
+
+                  AND cr.scenario_id =
+                    ${scenarioId}
+
+                  AND cr.customer_id =
+                    ${authorizedScenario.customer_id}
 
                 ORDER BY
                     cr.completed_at DESC
 
                 LIMIT 1;
             `;
-
-            return NextResponse.json({
-                status: "ok",
-                coverageRun:
-                    rows[0] ?? null,
-            });
-        }
-
-        const rows = await sql`
-            SELECT
-                cr.id,
-                cr.status,
-                cr.estimated_coverage_radius_m,
-                cr.coverage_area_sq_m,
-                cr.processing_time_seconds,
-                cr.frequency_mhz,
-                cr.eirp_watts,
-                cr.antenna_height_m,
-                cr.receiver_threshold_dbm,
-                cr.propagation_model,
-
-                cr.covered_population::double precision
-                    AS covered_population,
-
-                cr.census_vintage,
-                cr.population_dataset_source,
-                cr.population_dataset_version,
-                cr.population_allocation_method,
-                cr.population_geometry_basis,
-
-                cr.covered_fabric_locations::double precision
-                    AS covered_fabric_locations,
-
-                cr.fabric_version,
-                cr.fabric_dataset_source,
-                cr.fabric_dataset_vintage,
-                cr.fabric_geometry_basis,
-                cr.fabric_calculated_at,
-
-                s.name AS site_name
-
-            FROM coverage_runs cr
-
-            JOIN scenarios sc
-                ON sc.id = cr.scenario_id
-                AND sc.customer_id =
-                    cr.customer_id
-
-            JOIN sites s
-                ON s.id = sc.site_id
-                AND s.customer_id =
-                    cr.customer_id
-
-            WHERE cr.status = 'completed'
-                AND cr.coverage_geometry
-                    IS NOT NULL
-                AND cr.scenario_id =
-                    ${scenarioId}
-
-            ORDER BY
-                cr.completed_at DESC
-
-            LIMIT 1;
-        `;
 
         return NextResponse.json({
             status: "ok",
