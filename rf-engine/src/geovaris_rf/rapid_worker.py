@@ -1107,14 +1107,10 @@ def process_one_rapid_run() -> bool:
                 ),
             )
 
-            processing_time_seconds = (
-                time.perf_counter()
-                - started
-            )
 
             print(
-                "Dissolving display geometry "
-                "and calculating population in PostGIS..."
+                "Dissolving display geometry and calculating "
+                "population and location analytics in PostGIS..."
             )
 
             complete_rapid_run(
@@ -1130,10 +1126,15 @@ def process_one_rapid_run() -> bool:
                     geojson_result
                     .authoritative_covered_area_m2
                 ),
-                processing_time_seconds=(
-                    processing_time_seconds
+                processing_started_at=(
+                    started
                 ),
             )
+
+            processing_time_seconds = (
+                time.perf_counter()
+                - started
+)
 
             print(
                 "Completed Rapid Coverage run "

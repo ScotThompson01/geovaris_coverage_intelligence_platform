@@ -5,6 +5,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from geovaris_rf.rapid_run_completion import (
+    FABRIC_DATASET_SOURCE,
+    FABRIC_DATASET_VINTAGE,
+    FABRIC_GEOMETRY_BASIS,
+    FABRIC_VERSION,
     POPULATION_ALLOCATION_METHOD,
     POPULATION_DATASET_SOURCE,
     POPULATION_DATASET_VERSION,
@@ -273,6 +277,41 @@ class RapidRunCompletionTests(
             )
 
             self.assertIn(
+                "fabric_locations",
+                sql_text,
+            )
+
+            self.assertIn(
+                "fabric_summary",
+                sql_text,
+            )
+
+            self.assertIn(
+                "covered_fabric_locations",
+                sql_text,
+            )
+
+            self.assertIn(
+                "fabric_dataset_source",
+                sql_text,
+            )
+
+            self.assertIn(
+                "fabric_dataset_vintage",
+                sql_text,
+            )
+
+            self.assertIn(
+                "fabric_geometry_basis",
+                sql_text,
+            )
+
+            self.assertIn(
+                "fabric_calculated_at",
+                sql_text,
+            )
+
+            self.assertIn(
                 "processing_time_seconds = NULL",
                 sql_text,
             )
@@ -302,26 +341,47 @@ class RapidRunCompletionTests(
                 params[
                     4
                 ],
-                RAPID_PROPAGATION_MODEL,
+                FABRIC_DATASET_SOURCE,
             )
 
             self.assertEqual(
                 params[
                     5
                 ],
-                RAPID_PROPAGATION_MODEL_VERSION,
+                FABRIC_VERSION,
+            )
+
+            self.assertEqual(
+                params[
+                    6
+                ],
+                FABRIC_DATASET_VINTAGE,
             )
 
             self.assertEqual(
                 params[
                     7
                 ],
-                550_094_400.0,
+                RAPID_PROPAGATION_MODEL,
             )
 
             self.assertEqual(
                 params[
                     8
+                ],
+                RAPID_PROPAGATION_MODEL_VERSION,
+            )
+
+            self.assertEqual(
+                params[
+                    10
+                ],
+                550_094_400.0,
+            )
+
+            self.assertEqual(
+                params[
+                    11
                 ],
                 str(
                     POPULATION_DATASET_VINTAGE
@@ -330,35 +390,63 @@ class RapidRunCompletionTests(
 
             self.assertEqual(
                 params[
-                    9
+                    12
                 ],
                 POPULATION_DATASET_SOURCE,
             )
 
             self.assertEqual(
                 params[
-                    10
+                    13
                 ],
                 POPULATION_DATASET_VERSION,
             )
 
             self.assertEqual(
                 params[
-                    11
+                    14
                 ],
                 POPULATION_ALLOCATION_METHOD,
             )
 
             self.assertEqual(
                 params[
-                    12
+                    15
                 ],
                 POPULATION_GEOMETRY_BASIS,
             )
 
             self.assertEqual(
                 params[
-                    13
+                    16
+                ],
+                FABRIC_VERSION,
+            )
+
+            self.assertEqual(
+                params[
+                    17
+                ],
+                FABRIC_DATASET_SOURCE,
+            )
+
+            self.assertEqual(
+                params[
+                    18
+                ],
+                FABRIC_DATASET_VINTAGE,
+            )
+
+            self.assertEqual(
+                params[
+                    19
+                ],
+                FABRIC_GEOMETRY_BASIS,
+            )
+
+            self.assertEqual(
+                params[
+                    20
                 ],
                 "run-123",
             )
