@@ -15,13 +15,20 @@ covered_population
     Estimated population derived from Census block population,
     area-weighted by intersection with coverage_geometry.
 
+covered_fabric_locations
+    Count of governed Fabric-like point locations intersecting the
+    stored coverage display geometry.
+
 The display geometry may omit very small disconnected components.
 Therefore coverage_area_sq_m must never be recalculated from
 coverage_geometry for Rapid Coverage runs.
 
-Population coverage is currently based on the display geometry and is
-therefore an estimate rather than a raster-authoritative population
-result.
+Population and Fabric-location analytics currently use the stored
+display geometry and are therefore downstream estimates rather than
+raster-authoritative analytics.
+
+The current Fabric-location dataset used for TEST-002 is synthetic test
+data. It is NOT FCC Broadband Serviceable Location Fabric data.
 """
 
 from __future__ import annotations
@@ -54,6 +61,22 @@ POPULATION_ALLOCATION_METHOD = (
 )
 
 POPULATION_GEOMETRY_BASIS = (
+    "display_geometry"
+)
+
+FABRIC_DATASET_SOURCE = (
+    "GeoVaris Synthetic Test Data"
+)
+
+FABRIC_VERSION = (
+    "test002-demo-2026.1"
+)
+
+FABRIC_DATASET_VINTAGE = (
+    "synthetic"
+)
+
+FABRIC_GEOMETRY_BASIS = (
     "display_geometry"
 )
 
@@ -202,15 +225,21 @@ def complete_rapid_run(
 
     Display features are dissolved in PostGIS.
 
-    Population analytics are calculated in the same database statement
-    using governed Census blocks and the display coverage polygons.
+    Population analytics are calculated using governed Census blocks
+    and the dissolved display coverage geometry.
+
+    Fabric-location analytics are calculated using governed point
+    locations and the same dissolved display coverage geometry.
+
+    The current TEST-002 Fabric-like point dataset is synthetic test
+    data and must not be represented as FCC Fabric data.
 
     The authoritative coverage area comes directly from raster analytics
     and is stored separately from the display geometry.
 
     The final processing time is calculated after PostGIS population
-    analytics finish so processing_time_seconds reflects the complete
-    end-to-end Rapid Coverage workflow.
+    and Fabric-location analytics finish so processing_time_seconds
+    reflects the complete end-to-end Rapid Coverage workflow.
     """
 
     coverage_raster_uri = str(
@@ -295,7 +324,7 @@ def complete_rapid_run(
                 FROM input_geometries
             ),
 
-            matching_pairs AS (
+            matching_population_pairs AS (
                 SELECT
                     pb.geoid,
                     pb.population,
@@ -320,7 +349,7 @@ def complete_rapid_run(
                     )
             ),
 
-            intersection_areas AS (
+            population_intersection_areas AS (
                 SELECT
                     geoid,
                     population,
@@ -336,10 +365,10 @@ def complete_rapid_run(
                         )::geography
                     ) AS intersection_area_sq_m
 
-                FROM matching_pairs
+                FROM matching_population_pairs
             ),
 
-            block_totals AS (
+            population_block_totals AS (
                 SELECT
                     geoid,
 
@@ -355,13 +384,13 @@ def complete_rapid_run(
                         intersection_area_sq_m
                     ) AS covered_area_sq_m
 
-                FROM intersection_areas
+                FROM population_intersection_areas
 
                 GROUP BY
                     geoid
             ),
 
-            weighted_blocks AS (
+            weighted_population_blocks AS (
                 SELECT
                     geoid,
                     population,
@@ -381,7 +410,7 @@ def complete_rapid_run(
                         )
                     END AS coverage_fraction
 
-                FROM block_totals
+                FROM population_block_totals
             ),
 
             population_summary AS (
@@ -416,7 +445,27 @@ def complete_rapid_run(
                     )::bigint
                         AS covered_population
 
-                FROM weighted_blocks
+                FROM weighted_population_blocks
+            ),
+
+            fabric_summary AS (
+                SELECT
+                    COUNT(*)::bigint
+                        AS covered_fabric_locations
+
+                FROM fabric_locations fl
+
+                CROSS JOIN dissolved d
+
+                WHERE fl.dataset_source = %s
+                  AND fl.fabric_version = %s
+                  AND fl.dataset_vintage = %s
+                  AND fl.geometry
+                        && d.geom
+                  AND ST_Intersects(
+                        fl.geometry,
+                        d.geom
+                  )
             )
 
             UPDATE coverage_runs AS cr
@@ -466,6 +515,17 @@ def complete_rapid_run(
 
                 population_calculated_at = NOW(),
 
+                covered_fabric_locations = (
+                    SELECT covered_fabric_locations
+                    FROM fabric_summary
+                ),
+
+                fabric_version = %s,
+                fabric_dataset_source = %s,
+                fabric_dataset_vintage = %s,
+                fabric_geometry_basis = %s,
+                fabric_calculated_at = NOW(),
+
                 processing_time_seconds = NULL,
 
                 error_message = NULL
@@ -484,6 +544,10 @@ def complete_rapid_run(
                 POPULATION_DATASET_VERSION,
                 POPULATION_DATASET_VINTAGE,
 
+                FABRIC_DATASET_SOURCE,
+                FABRIC_VERSION,
+                FABRIC_DATASET_VINTAGE,
+
                 RAPID_PROPAGATION_MODEL,
                 RAPID_PROPAGATION_MODEL_VERSION,
 
@@ -498,6 +562,11 @@ def complete_rapid_run(
                 POPULATION_DATASET_VERSION,
                 POPULATION_ALLOCATION_METHOD,
                 POPULATION_GEOMETRY_BASIS,
+
+                FABRIC_VERSION,
+                FABRIC_DATASET_SOURCE,
+                FABRIC_DATASET_VINTAGE,
+                FABRIC_GEOMETRY_BASIS,
 
                 run_id,
             ),

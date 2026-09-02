@@ -12,32 +12,66 @@ type CoverageResultKpisProps = {
 type CoverageRun = {
     id: string;
     status: string;
+
     estimated_coverage_radius_m:
         | number
         | null;
+
     coverage_area_sq_m:
         | number
         | null;
+
     processing_time_seconds:
         | number
         | null;
+
     propagation_model: string;
+
     covered_population:
         | number
         | null;
+
     census_vintage:
         | string
         | null;
+
     population_dataset_source:
         | string
         | null;
+
     population_dataset_version:
         | string
         | null;
+
     population_allocation_method:
         | string
         | null;
+
     population_geometry_basis:
+        | string
+        | null;
+
+    covered_fabric_locations:
+        | number
+        | null;
+
+    fabric_version:
+        | string
+        | null;
+
+    fabric_dataset_source:
+        | string
+        | null;
+
+    fabric_dataset_vintage:
+        | string
+        | null;
+
+    fabric_geometry_basis:
+        | string
+        | null;
+
+    fabric_calculated_at:
         | string
         | null;
 };
@@ -68,6 +102,12 @@ const POPULATION_ALLOCATION_METHOD =
 
 const POPULATION_GEOMETRY_BASIS =
     "display_geometry";
+
+const FABRIC_GEOMETRY_BASIS =
+    "display_geometry";
+
+const SYNTHETIC_FABRIC_DATASET_SOURCE =
+    "GeoVaris Synthetic Test Data";
 
 export default function CoverageResultKpis({
     scenarioId,
@@ -247,6 +287,23 @@ export default function CoverageResultKpis({
         coverageRun.population_geometry_basis ===
             POPULATION_GEOMETRY_BASIS;
 
+    const hasLocationAnalytics =
+        coverageRun.covered_fabric_locations !==
+        null;
+
+    const isSyntheticLocationDataset =
+        coverageRun.fabric_dataset_source ===
+        SYNTHETIC_FABRIC_DATASET_SOURCE;
+
+    const usesDisplayGeometryForLocations =
+        coverageRun.fabric_geometry_basis ===
+        FABRIC_GEOMETRY_BASIS;
+
+    const locationKpiLabel =
+        isSyntheticLocationDataset
+            ? "Synthetic Test Locations Covered"
+            : "Estimated Fabric Locations Covered";
+
     return (
         <div>
             <div className="mb-4 flex items-end justify-between">
@@ -265,7 +322,7 @@ export default function CoverageResultKpis({
                 </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                 <ResultCard
                     label="Coverage Area"
                     value={
@@ -289,6 +346,18 @@ export default function CoverageResultKpis({
                             ? "—"
                             : Math.round(
                                   coverageRun.covered_population,
+                              ).toLocaleString()
+                    }
+                />
+
+                <ResultCard
+                    label={locationKpiLabel}
+                    value={
+                        coverageRun.covered_fabric_locations ===
+                        null
+                            ? "—"
+                            : Math.round(
+                                  coverageRun.covered_fabric_locations,
                               ).toLocaleString()
                     }
                 />
@@ -347,6 +416,32 @@ export default function CoverageResultKpis({
                     {" "}
                     Population coverage is an estimate and does not represent
                     confirmed service to individual people or locations.
+                </p>
+            ) : null}
+
+            {hasLocationAnalytics &&
+            isSyntheticLocationDataset ? (
+                <p className="mt-2 text-xs text-amber-700">
+                    Synthetic test location analytics use{" "}
+                    {coverageRun.fabric_version ??
+                        "the recorded synthetic dataset"}
+                    {usesDisplayGeometryForLocations
+                        ? " and count synthetic points intersecting the stored coverage display geometry."
+                        : "."}
+                    {" "}
+                    These locations are GeoVaris test data and are not FCC
+                    Broadband Serviceable Location Fabric records.
+                </p>
+            ) : null}
+
+            {hasLocationAnalytics &&
+            !isSyntheticLocationDataset ? (
+                <p className="mt-2 text-xs text-slate-500">
+                    Estimated Fabric location coverage counts governed point
+                    locations intersecting the stored coverage footprint.
+                    {" "}
+                    This result is an engineering/GIS estimate and does not
+                    establish actual service availability at any location.
                 </p>
             ) : null}
 

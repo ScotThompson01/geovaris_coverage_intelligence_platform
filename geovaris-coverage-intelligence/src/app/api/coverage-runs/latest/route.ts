@@ -55,6 +55,15 @@ export async function GET(
                     cr.population_allocation_method,
                     cr.population_geometry_basis,
 
+                    cr.covered_fabric_locations::double precision
+                        AS covered_fabric_locations,
+
+                    cr.fabric_version,
+                    cr.fabric_dataset_source,
+                    cr.fabric_dataset_vintage,
+                    cr.fabric_geometry_basis,
+                    cr.fabric_calculated_at,
+
                     ST_AsGeoJSON(
                         ST_ForcePolygonCCW(
                             cr.coverage_geometry
@@ -115,6 +124,15 @@ export async function GET(
                 cr.population_dataset_version,
                 cr.population_allocation_method,
                 cr.population_geometry_basis,
+
+                cr.covered_fabric_locations::double precision
+                    AS covered_fabric_locations,
+
+                cr.fabric_version,
+                cr.fabric_dataset_source,
+                cr.fabric_dataset_vintage,
+                cr.fabric_geometry_basis,
+                cr.fabric_calculated_at,
 
                 s.name AS site_name
 
