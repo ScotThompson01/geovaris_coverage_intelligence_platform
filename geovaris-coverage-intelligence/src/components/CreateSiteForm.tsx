@@ -35,7 +35,10 @@ export default function CreateSiteForm() {
   useEffect(() => {
     async function loadProjects() {
       try {
-        const response = await fetch("/api/projects");
+        const response =
+          await fetch(
+            "/api/projects?access=write",
+          );
         const data = await response.json();
 
         if (!response.ok) {

@@ -148,7 +148,9 @@ export default function CreateScenarioForm() {
     async function loadSites() {
       try {
         const response =
-          await fetch("/api/sites");
+          await fetch(
+            "/api/sites?access=write",
+          );
 
         const data =
           await response.json();
@@ -156,7 +158,7 @@ export default function CreateScenarioForm() {
         if (!response.ok) {
           throw new Error(
             data.error ??
-              "Unable to load sites.",
+            "Unable to load sites.",
           );
         }
 
@@ -374,19 +376,18 @@ export default function CreateScenarioForm() {
 
       const data =
         (await response.json()) as
-          ScenarioResponse;
+        ScenarioResponse;
 
       if (!response.ok) {
         throw new Error(
           data.error ??
-            "Unable to create scenario.",
+          "Unable to create scenario.",
         );
       }
 
       setMessage(
-        `Scenario ${
-          data.scenario?.name ??
-          name
+        `Scenario ${data.scenario?.name ??
+        name
         } created successfully.`,
       );
 
@@ -1052,10 +1053,9 @@ function SelectField({
             optionLabel,
           ]) => (
             <option
-              key={`${id}-${
-                optionValue ||
+              key={`${id}-${optionValue ||
                 "empty"
-              }`}
+                }`}
               value={
                 optionValue
               }
