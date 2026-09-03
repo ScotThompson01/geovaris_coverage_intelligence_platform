@@ -16,10 +16,11 @@ type CreateSiteRequest = {
     longitude?: number;
 };
 
-const SITE_CREATE_ROLES = new Set([
-    "customer_admin",
-    "engineer",
-]);
+const SITE_CREATE_ROLES =
+    new Set([
+        "customer_admin",
+        "engineer",
+    ]);
 
 export async function POST(
     request: NextRequest,
@@ -257,7 +258,9 @@ export async function POST(
     }
 }
 
-export async function GET() {
+export async function GET(
+    request: NextRequest,
+) {
     try {
         const authContext =
             await getGeoVarisAuthContext();
@@ -274,6 +277,14 @@ export async function GET() {
                 },
             );
         }
+
+        const access =
+            request.nextUrl.searchParams.get(
+                "access",
+            );
+
+        const writeOnly =
+            access === "write";
 
         if (
             authContext.isGeoVarisAdmin
@@ -313,10 +324,18 @@ export async function GET() {
         }
 
         const customerIds =
-            authContext.customerMemberships.map(
-                (membership) =>
-                    membership.customerId,
-            );
+            authContext.customerMemberships
+                .filter(
+                    (membership) =>
+                        !writeOnly ||
+                        SITE_CREATE_ROLES.has(
+                            membership.role,
+                        ),
+                )
+                .map(
+                    (membership) =>
+                        membership.customerId,
+                );
 
         if (
             customerIds.length === 0

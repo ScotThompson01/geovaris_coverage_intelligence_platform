@@ -533,6 +533,62 @@ async function main() {
         "PASS: Viewer can read Tenant A sites without seeing Tenant B",
     );
 
+const viewerWritableProjects =
+    await expectStatus(
+        "Viewer writable project list request is authorized",
+        "/api/projects?access=write",
+        200,
+        {
+            cookie:
+                viewerCookie,
+        },
+    );
+
+assert(
+    Array.isArray(
+        viewerWritableProjects.projects,
+    ),
+    "Viewer writable project response did not contain a projects array.",
+);
+
+assert(
+    viewerWritableProjects.projects.length ===
+        0,
+    "Viewer received writable projects despite having read-only access.",
+);
+
+console.log(
+    "PASS: Viewer writable project list is empty",
+);
+
+const viewerWritableSites =
+    await expectStatus(
+        "Viewer writable site list request is authorized",
+        "/api/sites?access=write",
+        200,
+        {
+            cookie:
+                viewerCookie,
+        },
+    );
+
+assert(
+    Array.isArray(
+        viewerWritableSites.sites,
+    ),
+    "Viewer writable site response did not contain a sites array.",
+);
+
+assert(
+    viewerWritableSites.sites.length ===
+        0,
+    "Viewer received writable sites despite having read-only access.",
+);
+
+console.log(
+    "PASS: Viewer writable site list is empty",
+);
+
     /*
      * Viewer write denial
      */

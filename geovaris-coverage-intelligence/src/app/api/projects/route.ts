@@ -1,4 +1,7 @@
-import { NextResponse } from "next/server";
+import {
+    NextRequest,
+    NextResponse,
+} from "next/server";
 
 import {
     getGeoVarisAuthContext,
@@ -6,7 +9,15 @@ import {
 
 import { sql } from "@/lib/db";
 
-export async function GET() {
+const PROJECT_WRITE_ROLES =
+    new Set([
+        "customer_admin",
+        "engineer",
+    ]);
+
+export async function GET(
+    request: NextRequest,
+) {
     try {
         const authContext =
             await getGeoVarisAuthContext();
@@ -23,6 +34,14 @@ export async function GET() {
                 },
             );
         }
+
+        const access =
+            request.nextUrl.searchParams.get(
+                "access",
+            );
+
+        const writeOnly =
+            access === "write";
 
         if (
             authContext.isGeoVarisAdmin
@@ -52,10 +71,18 @@ export async function GET() {
         }
 
         const customerIds =
-            authContext.customerMemberships.map(
-                (membership) =>
-                    membership.customerId,
-            );
+            authContext.customerMemberships
+                .filter(
+                    (membership) =>
+                        !writeOnly ||
+                        PROJECT_WRITE_ROLES.has(
+                            membership.role,
+                        ),
+                )
+                .map(
+                    (membership) =>
+                        membership.customerId,
+                );
 
         if (
             customerIds.length === 0
