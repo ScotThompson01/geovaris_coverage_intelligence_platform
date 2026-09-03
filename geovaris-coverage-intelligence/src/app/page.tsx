@@ -4,10 +4,18 @@ import CreateCoverageRunButton from "@/components/CreateCoverageRunButton";
 import CreateScenarioForm from "@/components/CreateScenarioForm";
 import CreateSiteForm from "@/components/CreateSiteForm";
 import ScenarioSelector from "@/components/ScenarioSelector";
+import SignInForm from "@/components/SignInForm";
+import SignOutButton from "@/components/SignOutButton";
+
+import {
+    getGeoVarisAuthContext,
+} from "@/lib/auth-context";
+
 import { sql } from "@/lib/db";
 
 type ScenarioRow = {
     scenario_id: string;
+    customer_id: string;
     customer_name: string;
     project_name: string;
     site_name: string;
@@ -43,62 +51,116 @@ type HomeProps = {
 export default async function Home({
     searchParams,
 }: HomeProps) {
+    const authContext =
+        await getGeoVarisAuthContext();
+
+    if (!authContext) {
+        return <SignInForm />;
+    }
+
     const resolvedSearchParams =
         (await searchParams) ?? {};
 
     const requestedScenarioId =
         resolvedSearchParams.scenarioId;
 
-    const scenarioOptions = (await sql`
-        SELECT
-            sc.id AS scenario_id,
-            sc.name AS scenario_name,
-            s.name AS site_name,
-            p.name AS project_name,
-            c.name AS customer_name
+    const readableCustomerIds =
+        authContext.customerMemberships.map(
+            (membership) =>
+                membership.customerId,
+        );
 
-        FROM customers c
+    let scenarioOptions:
+        ScenarioOptionRow[];
 
-        JOIN projects p
-            ON p.customer_id = c.id
+    if (
+        authContext.isGeoVarisAdmin
+    ) {
+        scenarioOptions = (await sql`
+            SELECT
+                sc.id AS scenario_id,
+                sc.name AS scenario_name,
+                s.name AS site_name,
+                p.name AS project_name,
+                c.name AS customer_name
 
-        JOIN sites s
-            ON s.project_id = p.id
-            AND s.customer_id = c.id
+            FROM customers c
 
-        JOIN scenarios sc
-            ON sc.site_id = s.id
-            AND sc.customer_id = c.id
+            JOIN projects p
+                ON p.customer_id =
+                    c.id
 
-        ORDER BY sc.created_at DESC;
-    `) as unknown as ScenarioOptionRow[];
+            JOIN sites s
+                ON s.project_id =
+                    p.id
+                AND s.customer_id =
+                    c.id
 
-    if (scenarioOptions.length === 0) {
+            JOIN scenarios sc
+                ON sc.site_id =
+                    s.id
+                AND sc.customer_id =
+                    c.id
+
+            ORDER BY
+                sc.created_at DESC;
+        `) as unknown as ScenarioOptionRow[];
+    } else if (
+        readableCustomerIds.length === 0
+    ) {
+        scenarioOptions = [];
+    } else {
+        scenarioOptions = (await sql`
+            SELECT
+                sc.id AS scenario_id,
+                sc.name AS scenario_name,
+                s.name AS site_name,
+                p.name AS project_name,
+                c.name AS customer_name
+
+            FROM customers c
+
+            JOIN projects p
+                ON p.customer_id =
+                    c.id
+
+            JOIN sites s
+                ON s.project_id =
+                    p.id
+                AND s.customer_id =
+                    c.id
+
+            JOIN scenarios sc
+                ON sc.site_id =
+                    s.id
+                AND sc.customer_id =
+                    c.id
+
+            WHERE c.id =
+                ANY(
+                    ${readableCustomerIds}::uuid[]
+                )
+
+            ORDER BY
+                sc.created_at DESC;
+        `) as unknown as ScenarioOptionRow[];
+    }
+
+    if (
+        scenarioOptions.length === 0
+    ) {
         return (
             <main className="min-h-screen bg-slate-50">
-                <header className="border-b border-slate-200 bg-white">
-                    <div className="mx-auto max-w-7xl px-6 py-5">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-                                    GeoVaris Coverage Intelligence
-                                </h1>
-
-                                <p className="mt-1 text-sm text-slate-500">
-                                    Clean data. Confident results.
-                                </p>
-                            </div>
-
-                            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-                                Development
-                            </span>
-                        </div>
-                    </div>
-                </header>
+                <AppHeader
+                    userName={
+                        authContext.userName
+                    }
+                />
 
                 <div className="mx-auto max-w-7xl px-6 py-8">
                     <p className="text-slate-600">
-                        No coverage scenario data was found.
+                        No coverage scenario data was found for your authorized
+                        customer workspace.
                     </p>
 
                     <section className="mt-8">
@@ -123,39 +185,99 @@ export default async function Home({
             ? requestedScenarioId
             : scenarioOptions[0].scenario_id;
 
-    const rows = (await sql`
-        SELECT
-            c.name AS customer_name,
-            p.name AS project_name,
-            s.name AS site_name,
-            s.latitude,
-            s.longitude,
+    let rows:
+        ScenarioRow[];
 
-            sc.id AS scenario_id,
-            sc.name AS scenario_name,
-            sc.frequency_mhz,
-            sc.eirp_watts,
-            sc.antenna_height_m,
-            sc.receiver_threshold_dbm,
-            sc.propagation_model
+    if (
+        authContext.isGeoVarisAdmin
+    ) {
+        rows = (await sql`
+            SELECT
+                c.id AS customer_id,
+                c.name AS customer_name,
+                p.name AS project_name,
+                s.name AS site_name,
+                s.latitude,
+                s.longitude,
 
-        FROM customers c
+                sc.id AS scenario_id,
+                sc.name AS scenario_name,
+                sc.frequency_mhz,
+                sc.eirp_watts,
+                sc.antenna_height_m,
+                sc.receiver_threshold_dbm,
+                sc.propagation_model
 
-        JOIN projects p
-            ON p.customer_id = c.id
+            FROM customers c
 
-        JOIN sites s
-            ON s.project_id = p.id
-            AND s.customer_id = c.id
+            JOIN projects p
+                ON p.customer_id =
+                    c.id
 
-        JOIN scenarios sc
-            ON sc.site_id = s.id
-            AND sc.customer_id = c.id
+            JOIN sites s
+                ON s.project_id =
+                    p.id
+                AND s.customer_id =
+                    c.id
 
-        WHERE sc.id = ${selectedScenarioId}
+            JOIN scenarios sc
+                ON sc.site_id =
+                    s.id
+                AND sc.customer_id =
+                    c.id
 
-        LIMIT 1;
-    `) as unknown as ScenarioRow[];
+            WHERE sc.id =
+                ${selectedScenarioId}
+
+            LIMIT 1;
+        `) as unknown as ScenarioRow[];
+    } else {
+        rows = (await sql`
+            SELECT
+                c.id AS customer_id,
+                c.name AS customer_name,
+                p.name AS project_name,
+                s.name AS site_name,
+                s.latitude,
+                s.longitude,
+
+                sc.id AS scenario_id,
+                sc.name AS scenario_name,
+                sc.frequency_mhz,
+                sc.eirp_watts,
+                sc.antenna_height_m,
+                sc.receiver_threshold_dbm,
+                sc.propagation_model
+
+            FROM customers c
+
+            JOIN projects p
+                ON p.customer_id =
+                    c.id
+
+            JOIN sites s
+                ON s.project_id =
+                    p.id
+                AND s.customer_id =
+                    c.id
+
+            JOIN scenarios sc
+                ON sc.site_id =
+                    s.id
+                AND sc.customer_id =
+                    c.id
+
+            WHERE sc.id =
+                ${selectedScenarioId}
+
+              AND c.id =
+                ANY(
+                    ${readableCustomerIds}::uuid[]
+                )
+
+            LIMIT 1;
+        `) as unknown as ScenarioRow[];
+    }
 
     const scenario =
         rows[0];
@@ -163,36 +285,22 @@ export default async function Home({
     if (!scenario) {
         return (
             <main className="min-h-screen bg-slate-50">
-                <header className="border-b border-slate-200 bg-white">
-                    <div className="mx-auto max-w-7xl px-6 py-5">
-                        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-                            GeoVaris Coverage Intelligence
-                        </h1>
-
-                        <p className="mt-1 text-sm text-slate-500">
-                            Clean data. Confident results.
-                        </p>
-                    </div>
-                </header>
+                <AppHeader
+                    userName={
+                        authContext.userName
+                    }
+                />
 
                 <div className="mx-auto max-w-7xl px-6 py-8">
                     <p className="text-slate-600">
-                        The selected scenario could not be found.
+                        The selected scenario could not be found in your
+                        authorized customer workspace.
                     </p>
                 </div>
             </main>
         );
     }
 
-    /*
-     * Read the methodology used by the latest completed
-     * coverage result independently from the saved scenario.
-     *
-     * This distinction is important because a scenario may
-     * contain one propagation-model configuration while a
-     * particular coverage run uses another approved analysis
-     * method, such as Rapid Coverage.
-     */
     const latestCoverageRuns = (await sql`
         SELECT
             propagation_model,
@@ -200,8 +308,14 @@ export default async function Home({
 
         FROM coverage_runs
 
-        WHERE scenario_id = ${scenario.scenario_id}
-            AND status = 'completed'
+        WHERE scenario_id =
+            ${scenario.scenario_id}
+
+          AND customer_id =
+            ${scenario.customer_id}
+
+          AND status =
+            'completed'
 
         ORDER BY
             completed_at DESC NULLS LAST,
@@ -211,29 +325,16 @@ export default async function Home({
     `) as unknown as LatestCoverageRunRow[];
 
     const latestCoverageRun =
-        latestCoverageRuns[0] ?? null;
+        latestCoverageRuns[0] ??
+        null;
 
     return (
         <main className="min-h-screen bg-slate-50">
-            <header className="border-b border-slate-200 bg-white">
-                <div className="mx-auto max-w-7xl px-6 py-5">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-                                GeoVaris Coverage Intelligence
-                            </h1>
-
-                            <p className="mt-1 text-sm text-slate-500">
-                                Clean data. Confident results.
-                            </p>
-                        </div>
-
-                        <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-                            Development
-                        </span>
-                    </div>
-                </div>
-            </header>
+            <AppHeader
+                userName={
+                    authContext.userName
+                }
+            />
 
             <div className="mx-auto max-w-7xl px-6 py-8">
                 <section className="mb-8">
@@ -378,14 +479,14 @@ export default async function Home({
                                 }
                             />
 
-                            {latestCoverageRun?.propagation_model_version && (
+                            {latestCoverageRun?.propagation_model_version ? (
                                 <DetailRow
                                     label="Run Method Version"
                                     value={
                                         latestCoverageRun.propagation_model_version
                                     }
                                 />
-                            )}
+                            ) : null}
 
                             <DetailRow
                                 label="Scenario"
@@ -413,6 +514,50 @@ export default async function Home({
                 </section>
             </div>
         </main>
+    );
+}
+
+type AppHeaderProps = {
+    userName: string;
+};
+
+function AppHeader({
+    userName,
+}: AppHeaderProps) {
+    return (
+        <header className="border-b border-slate-200 bg-white">
+            <div className="mx-auto max-w-7xl px-6 py-5">
+                <div className="flex items-center justify-between gap-6">
+                    <div>
+                        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+                            GeoVaris Coverage Intelligence
+                        </h1>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                            Clean data. Confident results.
+                        </p>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        <div className="hidden text-right sm:block">
+                            <p className="text-sm font-medium text-slate-800">
+                                {userName}
+                            </p>
+
+                            <p className="text-xs text-slate-500">
+                                Authenticated
+                            </p>
+                        </div>
+
+                        <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+                            Development
+                        </span>
+
+                        <SignOutButton />
+                    </div>
+                </div>
+            </div>
+        </header>
     );
 }
 
