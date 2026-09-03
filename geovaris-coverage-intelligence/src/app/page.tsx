@@ -70,6 +70,29 @@ export default async function Home({
                 membership.customerId,
         );
 
+    const writableRoles =
+        new Set([
+            "customer_admin",
+            "engineer",
+        ]);
+
+    const writableCustomerIds =
+        authContext.customerMemberships
+            .filter(
+                (membership) =>
+                    writableRoles.has(
+                        membership.role,
+                    ),
+            )
+            .map(
+                (membership) =>
+                    membership.customerId,
+            );
+
+    const canCreateResources =
+        authContext.isGeoVarisAdmin ||
+        writableCustomerIds.length > 0;
+
     let scenarioOptions:
         ScenarioOptionRow[];
 
@@ -163,13 +186,28 @@ export default async function Home({
                         customer workspace.
                     </p>
 
-                    <section className="mt-8">
-                        <CreateSiteForm />
-                    </section>
+                    {canCreateResources ? (
+                        <>
+                            <section className="mt-8">
+                                <CreateSiteForm />
+                            </section>
 
-                    <section className="mt-8">
-                        <CreateScenarioForm />
-                    </section>
+                            <section className="mt-8">
+                                <CreateScenarioForm />
+                            </section>
+                        </>
+                    ) : (
+                        <div className="mt-8 rounded-lg border border-slate-200 bg-white px-4 py-3">
+                            <p className="text-sm font-medium text-slate-700">
+                                Read-only access
+                            </p>
+
+                            <p className="mt-1 text-sm text-slate-500">
+                                Your role does not permit creating sites or
+                                scenarios.
+                            </p>
+                        </div>
+                    )}
                 </div>
             </main>
         );
@@ -301,6 +339,12 @@ export default async function Home({
         );
     }
 
+    const canWriteSelectedScenario =
+        authContext.isGeoVarisAdmin ||
+        writableCustomerIds.includes(
+            scenario.customer_id,
+        );
+
     const latestCoverageRuns = (await sql`
         SELECT
             propagation_model,
@@ -395,13 +439,28 @@ export default async function Home({
                     />
                 </section>
 
-                <section className="mt-6">
-                    <CreateCoverageRunButton
-                        scenarioId={
-                            scenario.scenario_id
-                        }
-                    />
-                </section>
+                {canWriteSelectedScenario ? (
+                    <section className="mt-6">
+                        <CreateCoverageRunButton
+                            scenarioId={
+                                scenario.scenario_id
+                            }
+                        />
+                    </section>
+                ) : (
+                    <section className="mt-6">
+                        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                            <p className="text-sm font-medium text-slate-700">
+                                Read-only access
+                            </p>
+
+                            <p className="mt-1 text-sm text-slate-500">
+                                Your role allows you to view this coverage
+                                analysis, but not create new coverage runs.
+                            </p>
+                        </div>
+                    </section>
+                )}
 
                 <section className="mt-8">
                     <CoverageResultKpis
@@ -505,13 +564,17 @@ export default async function Home({
                     </div>
                 </section>
 
-                <section className="mt-8">
-                    <CreateSiteForm />
-                </section>
+                {canCreateResources ? (
+                    <>
+                        <section className="mt-8">
+                            <CreateSiteForm />
+                        </section>
 
-                <section className="mt-8">
-                    <CreateScenarioForm />
-                </section>
+                        <section className="mt-8">
+                            <CreateScenarioForm />
+                        </section>
+                    </>
+                ) : null}
             </div>
         </main>
     );
