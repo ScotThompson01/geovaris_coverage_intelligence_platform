@@ -3,6 +3,7 @@ import CoverageResultKpis from "@/components/CoverageResultKpis";
 import CreateCoverageRunButton from "@/components/CreateCoverageRunButton";
 import CreateScenarioForm from "@/components/CreateScenarioForm";
 import CreateSiteForm from "@/components/CreateSiteForm";
+import ScenarioComparison from "@/components/ScenarioComparison";
 import ScenarioSelector from "@/components/ScenarioSelector";
 import SignInForm from "@/components/SignInForm";
 import SignOutButton from "@/components/SignOutButton";
@@ -34,6 +35,7 @@ type ScenarioOptionRow = {
     scenario_name: string;
     site_name: string;
     project_name: string;
+    customer_id: string;
     customer_name: string;
 };
 
@@ -105,6 +107,7 @@ export default async function Home({
                 sc.name AS scenario_name,
                 s.name AS site_name,
                 p.name AS project_name,
+                c.id AS customer_id,
                 c.name AS customer_name
 
             FROM customers c
@@ -139,6 +142,7 @@ export default async function Home({
                 sc.name AS scenario_name,
                 s.name AS site_name,
                 p.name AS project_name,
+                c.id AS customer_id,
                 c.name AS customer_name
 
             FROM customers c
@@ -563,6 +567,17 @@ export default async function Home({
                             />
                         </dl>
                     </div>
+                </section>
+
+                <section className="mt-8">
+                    <ScenarioComparison
+                        selectedScenarioId={
+                            scenario.scenario_id
+                        }
+                        options={
+                            scenarioOptions
+                        }
+                    />
                 </section>
 
                 {canCreateResources ? (
