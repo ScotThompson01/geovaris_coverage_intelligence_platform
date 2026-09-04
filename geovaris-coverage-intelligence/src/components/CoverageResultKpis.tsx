@@ -74,11 +74,29 @@ type CoverageRun = {
     fabric_calculated_at:
         | string
         | null;
+
+    location_dataset_id:
+        | string
+        | null;
+
+    location_dataset_name:
+        | string
+        | null;
+
+    location_dataset_type:
+        | string
+        | null;
+
+    location_dataset_is_mock:
+        | boolean
+        | null;
 };
 
 type CoverageRunResponse = {
     status: string;
-    coverageRun: CoverageRun | null;
+    coverageRun:
+        | CoverageRun
+        | null;
     error?: string;
 };
 
@@ -103,11 +121,14 @@ const POPULATION_ALLOCATION_METHOD =
 const POPULATION_GEOMETRY_BASIS =
     "display_geometry";
 
-const FABRIC_GEOMETRY_BASIS =
+const LOCATION_GEOMETRY_BASIS =
     "display_geometry";
 
-const SYNTHETIC_FABRIC_DATASET_SOURCE =
+const LEGACY_SYNTHETIC_DATASET_SOURCE =
     "GeoVaris Synthetic Test Data";
+
+const MOCK_FCC_FABRIC_DATASET_TYPE =
+    "mock_fcc_fabric";
 
 export default function CoverageResultKpis({
     scenarioId,
@@ -145,6 +166,7 @@ export default function CoverageResultKpis({
                         {
                             cache:
                                 "no-store",
+
                             signal:
                                 abortController.signal,
                         },
@@ -169,7 +191,10 @@ export default function CoverageResultKpis({
                 );
 
                 setError("");
-                setIsLoading(false);
+
+                setIsLoading(
+                    false,
+                );
             } catch (err) {
                 if (
                     abortController
@@ -291,18 +316,44 @@ export default function CoverageResultKpis({
         coverageRun.covered_fabric_locations !==
         null;
 
-    const isSyntheticLocationDataset =
+    /*
+     * New governed dataset flow:
+     * use the linked dataset's explicit is_mock flag.
+     *
+     * Legacy fallback:
+     * older test runs may not have location_dataset_id,
+     * so preserve recognition of the historical synthetic
+     * source value.
+     */
+    const isMockLocationDataset =
+        coverageRun.location_dataset_is_mock ===
+            true ||
         coverageRun.fabric_dataset_source ===
-        SYNTHETIC_FABRIC_DATASET_SOURCE;
+            LEGACY_SYNTHETIC_DATASET_SOURCE;
+
+    const isMockFccFabricDataset =
+        coverageRun.location_dataset_type ===
+            MOCK_FCC_FABRIC_DATASET_TYPE;
 
     const usesDisplayGeometryForLocations =
         coverageRun.fabric_geometry_basis ===
-        FABRIC_GEOMETRY_BASIS;
+        LOCATION_GEOMETRY_BASIS;
 
-    const locationKpiLabel =
-        isSyntheticLocationDataset
-            ? "Synthetic Test Locations Covered"
-            : "Estimated Fabric Locations Covered";
+    let locationKpiLabel =
+        "Estimated Fabric Locations Covered";
+
+    if (
+        isMockLocationDataset &&
+        isMockFccFabricDataset
+    ) {
+        locationKpiLabel =
+            "Mock Fabric Locations Covered";
+    } else if (
+        isMockLocationDataset
+    ) {
+        locationKpiLabel =
+            "Synthetic Test Locations Covered";
+    }
 
     return (
         <div>
@@ -332,7 +383,8 @@ export default function CoverageResultKpis({
                             : `${areaSquareMiles.toLocaleString(
                                   undefined,
                                   {
-                                      maximumFractionDigits: 1,
+                                      maximumFractionDigits:
+                                          1,
                                   },
                               )} mi²`
                     }
@@ -351,7 +403,9 @@ export default function CoverageResultKpis({
                 />
 
                 <ResultCard
-                    label={locationKpiLabel}
+                    label={
+                        locationKpiLabel
+                    }
                     value={
                         coverageRun.covered_fabric_locations ===
                         null
@@ -412,34 +466,33 @@ export default function CoverageResultKpis({
                     Census block population
                     {usesCurrentPopulationMethod
                         ? ", area-weighted by the portion of each block intersecting the stored coverage display geometry."
-                        : "."}
-                    {" "}
+                        : "."}{" "}
                     Population coverage is an estimate and does not represent
                     confirmed service to individual people or locations.
                 </p>
             ) : null}
 
             {hasLocationAnalytics &&
-            isSyntheticLocationDataset ? (
+            isMockLocationDataset ? (
                 <p className="mt-2 text-xs text-amber-700">
-                    Synthetic test location analytics use{" "}
-                    {coverageRun.fabric_version ??
-                        "the recorded synthetic dataset"}
+                    Mock location analytics use{" "}
+                    {coverageRun.location_dataset_name ??
+                        coverageRun.fabric_version ??
+                        "the recorded test dataset"}
                     {usesDisplayGeometryForLocations
-                        ? " and count synthetic points intersecting the stored coverage display geometry."
-                        : "."}
-                    {" "}
-                    These locations are GeoVaris test data and are not FCC
-                    Broadband Serviceable Location Fabric records.
+                        ? " and count test points intersecting the stored coverage display geometry."
+                        : "."}{" "}
+                    These locations are mock or synthetic GeoVaris test data and
+                    are not licensed FCC Broadband Serviceable Location Fabric
+                    records.
                 </p>
             ) : null}
 
             {hasLocationAnalytics &&
-            !isSyntheticLocationDataset ? (
+            !isMockLocationDataset ? (
                 <p className="mt-2 text-xs text-slate-500">
                     Estimated Fabric location coverage counts governed point
-                    locations intersecting the stored coverage footprint.
-                    {" "}
+                    locations intersecting the stored coverage footprint.{" "}
                     This result is an engineering/GIS estimate and does not
                     establish actual service availability at any location.
                 </p>
