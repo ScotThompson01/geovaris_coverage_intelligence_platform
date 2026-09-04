@@ -470,15 +470,16 @@ export default async function Home({
                     />
                 </section>
 
-                <section className="mt-8 grid gap-6 lg:grid-cols-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+                <section className="mt-8 grid gap-6 lg:grid-cols-5">
+                    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-4">
                         <div>
                             <h3 className="text-lg font-semibold text-slate-900">
                                 Coverage Map
                             </h3>
 
                             <p className="mt-1 text-sm text-slate-500">
-                                Interactive site and RF coverage visualization.
+                                Interactive site, RF coverage, and governed
+                                location visualization.
                             </p>
                         </div>
 
