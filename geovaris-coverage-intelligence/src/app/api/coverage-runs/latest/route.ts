@@ -183,13 +183,26 @@ export async function GET(
                         cr.fabric_geometry_basis,
                         cr.fabric_calculated_at,
 
+                        cr.location_dataset_id,
+
+                        ld.name
+                            AS location_dataset_name,
+
+                        ld.dataset_type
+                            AS location_dataset_type,
+
+                        ld.is_mock
+                            AS location_dataset_is_mock,
+
                         ST_AsGeoJSON(
                             ST_ForcePolygonCCW(
                                 cr.coverage_geometry
                             )
-                        )::json AS coverage_geometry,
+                        )::json
+                            AS coverage_geometry,
 
-                        s.name AS site_name
+                        s.name
+                            AS site_name
 
                     FROM coverage_runs cr
 
@@ -203,6 +216,12 @@ export async function GET(
                         ON s.id =
                             sc.site_id
                         AND s.customer_id =
+                            cr.customer_id
+
+                    LEFT JOIN location_datasets ld
+                        ON ld.id =
+                            cr.location_dataset_id
+                        AND ld.customer_id =
                             cr.customer_id
 
                     WHERE cr.status =
@@ -262,7 +281,19 @@ export async function GET(
                     cr.fabric_geometry_basis,
                     cr.fabric_calculated_at,
 
-                    s.name AS site_name
+                    cr.location_dataset_id,
+
+                    ld.name
+                        AS location_dataset_name,
+
+                    ld.dataset_type
+                        AS location_dataset_type,
+
+                    ld.is_mock
+                        AS location_dataset_is_mock,
+
+                    s.name
+                        AS site_name
 
                 FROM coverage_runs cr
 
@@ -276,6 +307,12 @@ export async function GET(
                     ON s.id =
                         sc.site_id
                     AND s.customer_id =
+                        cr.customer_id
+
+                LEFT JOIN location_datasets ld
+                    ON ld.id =
+                        cr.location_dataset_id
+                    AND ld.customer_id =
                         cr.customer_id
 
                 WHERE cr.status =
