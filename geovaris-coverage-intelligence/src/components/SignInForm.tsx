@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 
 import {
     FormEvent,
@@ -48,7 +49,7 @@ export default function SignInForm() {
             if (result.error) {
                 setError(
                     result.error.message ??
-                    "Unable to sign in.",
+                        "Unable to sign in.",
                 );
 
                 return;
@@ -71,8 +72,6 @@ export default function SignInForm() {
 
     return (
         <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-50 px-6 py-12">
-
-            {/* Decorative RF rings */}
             <div
                 aria-hidden="true"
                 className="pointer-events-none absolute -left-56 top-1/2 h-[620px] w-[620px] -translate-y-1/2 rounded-full border border-indigo-100"
@@ -94,8 +93,6 @@ export default function SignInForm() {
             />
 
             <div className="relative z-10 w-full max-w-3xl">
-
-                {/* GeoVaris brand */}
                 <div className="mb-7 text-center">
                     <div className="flex w-full justify-center">
                         <Image
@@ -117,16 +114,10 @@ export default function SignInForm() {
                     </p>
                 </div>
 
-                {/* Login card */}
                 <div className="overflow-hidden rounded-2xl border-2 border-violet-500 bg-white shadow-[0_18px_55px_rgba(79,70,229,0.12)]">
-
                     <div className="grid md:grid-cols-[0.95fr_1.05fr]">
-
-                        {/* Coverage Intelligence branding */}
                         <div className="flex items-center justify-center border-b border-slate-200 bg-gradient-to-br from-violet-50 via-white to-cyan-50 p-8 md:border-b-0 md:border-r">
-
                             <div className="text-center">
-
                                 <Image
                                     src="/branding/coverage-intelligence-platform.png"
                                     alt="GeoVaris Coverage Intelligence Platform"
@@ -139,14 +130,10 @@ export default function SignInForm() {
                                 <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">
                                     Coverage Intelligence Platform
                                 </p>
-
                             </div>
-
                         </div>
 
-                        {/* Sign-in form */}
                         <div className="p-8 md:p-10">
-
                             <p className="text-xs font-semibold uppercase tracking-wider text-violet-600">
                                 Secure Access
                             </p>
@@ -165,7 +152,6 @@ export default function SignInForm() {
                                     handleSubmit
                                 }
                             >
-
                                 <div>
                                     <label
                                         htmlFor="email"
@@ -191,12 +177,21 @@ export default function SignInForm() {
                                 </div>
 
                                 <div>
-                                    <label
-                                        htmlFor="password"
-                                        className="text-sm font-medium text-slate-700"
-                                    >
-                                        Password
-                                    </label>
+                                    <div className="flex items-center justify-between gap-4">
+                                        <label
+                                            htmlFor="password"
+                                            className="text-sm font-medium text-slate-700"
+                                        >
+                                            Password
+                                        </label>
+
+                                        <Link
+                                            href="/forgot-password"
+                                            className="text-sm font-medium text-violet-600 hover:text-violet-700"
+                                        >
+                                            Forgot password?
+                                        </Link>
+                                    </div>
 
                                     <input
                                         id="password"
@@ -231,25 +226,17 @@ export default function SignInForm() {
                                         ? "Signing in..."
                                         : "Sign in"}
                                 </button>
-
                             </form>
 
                             <div className="mt-7 border-t border-slate-100 pt-5">
-
                                 <p className="text-center text-xs text-slate-400">
                                     Secure GeoVaris customer access
                                 </p>
-
                             </div>
-
                         </div>
-
                     </div>
-
                 </div>
-
             </div>
-
         </main>
     );
 }
