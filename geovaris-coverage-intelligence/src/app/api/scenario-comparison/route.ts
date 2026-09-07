@@ -21,11 +21,25 @@ type ScenarioComparisonRow = {
     site_name: string;
     scenario_name: string;
 
-    frequency_mhz: number;
-    eirp_watts: number;
-    antenna_height_m: number;
-    receiver_threshold_dbm: number;
-    propagation_model: string;
+    frequency_mhz:
+        | number
+        | null;
+
+    eirp_watts:
+        | number
+        | null;
+
+    antenna_height_m:
+        | number
+        | null;
+
+    receiver_threshold_dbm:
+        | number
+        | null;
+
+    propagation_model:
+        | string
+        | null;
 
     coverage_run_id:
         | string
@@ -152,11 +166,20 @@ export async function GET(
                         s.name AS site_name,
                         sc.name AS scenario_name,
 
-                        sc.frequency_mhz,
-                        sc.eirp_watts,
-                        sc.antenna_height_m,
-                        sc.receiver_threshold_dbm,
-                        sc.propagation_model,
+                        latest_run.frequency_mhz::double precision
+                            AS frequency_mhz,
+
+                        latest_run.eirp_watts::double precision
+                            AS eirp_watts,
+
+                        latest_run.antenna_height_m::double precision
+                            AS antenna_height_m,
+
+                        latest_run.receiver_threshold_dbm::double precision
+                            AS receiver_threshold_dbm,
+
+                        latest_run.propagation_model
+                            AS propagation_model,
 
                         latest_run.id
                             AS coverage_run_id,
@@ -193,6 +216,13 @@ export async function GET(
                     LEFT JOIN LATERAL (
                         SELECT
                             cr.id,
+
+                            cr.frequency_mhz,
+                            cr.eirp_watts,
+                            cr.antenna_height_m,
+                            cr.receiver_threshold_dbm,
+                            cr.propagation_model,
+
                             cr.coverage_area_sq_m,
                             cr.covered_population,
                             cr.covered_fabric_locations,
@@ -251,11 +281,20 @@ export async function GET(
                         s.name AS site_name,
                         sc.name AS scenario_name,
 
-                        sc.frequency_mhz,
-                        sc.eirp_watts,
-                        sc.antenna_height_m,
-                        sc.receiver_threshold_dbm,
-                        sc.propagation_model,
+                        latest_run.frequency_mhz::double precision
+                            AS frequency_mhz,
+
+                        latest_run.eirp_watts::double precision
+                            AS eirp_watts,
+
+                        latest_run.antenna_height_m::double precision
+                            AS antenna_height_m,
+
+                        latest_run.receiver_threshold_dbm::double precision
+                            AS receiver_threshold_dbm,
+
+                        latest_run.propagation_model
+                            AS propagation_model,
 
                         latest_run.id
                             AS coverage_run_id,
@@ -292,6 +331,13 @@ export async function GET(
                     LEFT JOIN LATERAL (
                         SELECT
                             cr.id,
+
+                            cr.frequency_mhz,
+                            cr.eirp_watts,
+                            cr.antenna_height_m,
+                            cr.receiver_threshold_dbm,
+                            cr.propagation_model,
+
                             cr.coverage_area_sq_m,
                             cr.covered_population,
                             cr.covered_fabric_locations,
