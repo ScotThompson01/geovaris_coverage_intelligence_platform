@@ -942,14 +942,6 @@ def process_one_itm_run() -> bool:
         get_database_url()
     )
 
-    dem_raster_path = (
-        get_dem_raster_path()
-    )
-
-    output_root = (
-        get_output_root()
-    )
-
     requested_run_id = (
         get_requested_run_id()
     )
@@ -998,6 +990,20 @@ def process_one_itm_run() -> bool:
         )
 
         try:
+            # Resolve ITM-specific resources only after an
+            # actual ITM run has been claimed.
+            #
+            # This allows the continuous multi-model worker
+            # to poll for ITM work without requiring ITM DEM
+            # configuration when no ITM job exists.
+            dem_raster_path = (
+                get_dem_raster_path()
+            )
+
+            output_root = (
+                get_output_root()
+            )
+
             _validate_run(
                 coverage_run
             )
@@ -1123,13 +1129,11 @@ def process_one_itm_run() -> bool:
                 ),
                 "eirp_dbm": eirp_dbm,
 
-                # The stored antenna_gain_dbi is a transmitter
-                # parameter. EIRP already includes transmit gain,
-                # so it must not be added again here.
+                # EIRP already includes transmitter gain.
                 "receiver_gain_dbi": 0.0,
 
                 # No separate system-loss field exists in the
-                # current scenario contract yet.
+                # current scenario contract.
                 "additional_losses_db": 0.0,
 
                 "receiver_threshold_dbm": float(
@@ -1315,7 +1319,6 @@ def process_one_itm_run() -> bool:
             )
 
             raise
-
 
 if __name__ == "__main__":
     process_one_itm_run()
