@@ -40,6 +40,7 @@ type ScenarioOptionRow = {
 };
 
 type LatestCoverageRunRow = {
+    id: string;
     propagation_model: string;
     propagation_model_version: string | null;
 };
@@ -219,11 +220,11 @@ export default async function Home({
 
     const selectedScenarioId =
         requestedScenarioId &&
-        scenarioOptions.some(
-            (option) =>
-                option.scenario_id ===
-                requestedScenarioId,
-        )
+            scenarioOptions.some(
+                (option) =>
+                    option.scenario_id ===
+                    requestedScenarioId,
+            )
             ? requestedScenarioId
             : scenarioOptions[0].scenario_id;
 
@@ -351,6 +352,7 @@ export default async function Home({
 
     const latestCoverageRuns = (await sql`
         SELECT
+            id,
             propagation_model,
             propagation_model_version
 
@@ -537,8 +539,8 @@ export default async function Home({
                                 value={
                                     latestCoverageRun
                                         ? formatPropagationModel(
-                                              latestCoverageRun.propagation_model,
-                                          )
+                                            latestCoverageRun.propagation_model,
+                                        )
                                         : "No completed run"
                                 }
                             />
@@ -550,6 +552,17 @@ export default async function Home({
                                         latestCoverageRun.propagation_model_version
                                     }
                                 />
+                            ) : null}
+
+                            {latestCoverageRun ? (
+                                <div className="pt-2">
+                                    <a
+                                        href={`/api/coverage-runs/report/csv?runId=${latestCoverageRun.id}`}
+                                        className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
+                                    >
+                                        Export CSV
+                                    </a>
+                                </div>
                             ) : null}
 
                             <DetailRow
