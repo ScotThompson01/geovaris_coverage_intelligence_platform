@@ -413,5 +413,72 @@ class TestCoverageGeoJsonGeometry(unittest.TestCase):
         )
 
 
+class TestIdleItmWorkerPolling(unittest.TestCase):
+    def test_no_pending_itm_run_does_not_require_dem(
+        self,
+    ) -> None:
+        from unittest.mock import (
+            MagicMock,
+            patch,
+        )
+
+        from geovaris_rf.itm_worker import (
+            process_one_itm_run,
+        )
+
+        mock_connection = MagicMock()
+
+        mock_connection.__enter__.return_value = (
+            mock_connection
+        )
+
+        mock_connection.__exit__.return_value = (
+            False
+        )
+
+        with (
+            patch(
+                "geovaris_rf.itm_worker.get_database_url",
+                return_value=(
+                    "postgresql://test"
+                ),
+            ),
+            patch(
+                "geovaris_rf.itm_worker.get_requested_run_id",
+                return_value=None,
+            ),
+            patch(
+                "geovaris_rf.itm_worker.psycopg.connect",
+                return_value=(
+                    mock_connection
+                ),
+            ),
+            patch(
+                "geovaris_rf.itm_worker.claim_pending_itm_run",
+                return_value=None,
+            ) as mock_claim,
+            patch(
+                "geovaris_rf.itm_worker.get_dem_raster_path",
+            ) as mock_get_dem,
+            patch(
+                "geovaris_rf.itm_worker.get_output_root",
+            ) as mock_get_output,
+        ):
+            processed = (
+                process_one_itm_run()
+            )
+
+        self.assertFalse(
+            processed
+        )
+
+        mock_claim.assert_called_once_with(
+            mock_connection
+        )
+
+        mock_get_dem.assert_not_called()
+
+        mock_get_output.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
