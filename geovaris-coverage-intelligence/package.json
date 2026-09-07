@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:tenant-isolation": "node scripts/verify-tenant-isolation.mjs"
+    "test:tenant-isolation": "node scripts/verify-tenant-isolation.mjs",
+    "test:scenario-comparison": "node scripts/verify-scenario-comparison-run-snapshots.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
