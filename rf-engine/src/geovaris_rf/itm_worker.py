@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import socket
 import sys
 import time
 from pathlib import Path
@@ -93,6 +94,8 @@ RUN_ID_ENVIRONMENT_VARIABLE = (
     "GEOVARIS_COVERAGE_RUN_ID"
 )
 
+RETRY_DELAY_SECONDS = 30
+
 DEFAULT_OUTPUT_ROOT = Path(
     "rf-engine/data/coverage"
 )
@@ -127,6 +130,28 @@ def get_requested_run_id() -> str | None:
     value = value.strip()
 
     return value or None
+
+
+def get_worker_id() -> str:
+    """Return the identifier recorded when this worker claims work.
+
+    GEOVARIS_WORKER_ID may be configured explicitly in deployed
+    environments. Development workers fall back to hostname + PID.
+    """
+
+    configured_worker_id = (
+        os.getenv(
+            "GEOVARIS_WORKER_ID",
+            "",
+        ).strip()
+    )
+
+    if configured_worker_id:
+        return configured_worker_id
+
+    return (
+        f"{socket.gethostname()}:{os.getpid()}"
+    )
 
 
 def _resolve_required_file(
@@ -312,15 +337,23 @@ def _terrain_sample_spacing_m(
 def claim_pending_itm_run(
     connection: psycopg.Connection,
 ) -> dict[str, Any] | None:
-    """Claim one pending NTIA ITM coverage run.
+    """Claim one eligible pending NTIA ITM coverage run.
 
     When GEOVARIS_COVERAGE_RUN_ID is configured, only that pending
-    NTIA ITM run is eligible. Otherwise the oldest pending NTIA ITM
-    run is claimed.
+    NTIA ITM run is eligible. Otherwise the oldest eligible pending
+    NTIA ITM run is claimed.
+
+    The database row is locked while the claim metadata and status
+    transition are written so concurrent workers cannot claim the
+    same coverage run.
     """
 
     requested_run_id = (
         get_requested_run_id()
+    )
+
+    worker_id = (
+        get_worker_id()
     )
 
     with connection.transaction():
@@ -381,6 +414,11 @@ def claim_pending_itm_run(
 
                     WHERE status = 'pending'
                       AND propagation_model = %s
+                      AND attempt_count < max_attempts
+                      AND (
+                          next_attempt_at IS NULL
+                          OR next_attempt_at <= NOW()
+                      )
 
                     ORDER BY created_at
 
@@ -447,6 +485,11 @@ def claim_pending_itm_run(
                     WHERE id = %s
                       AND status = 'pending'
                       AND propagation_model = %s
+                      AND attempt_count < max_attempts
+                      AND (
+                          next_attempt_at IS NULL
+                          OR next_attempt_at <= NOW()
+                      )
 
                     FOR UPDATE SKIP LOCKED
 
@@ -472,15 +515,27 @@ def claim_pending_itm_run(
                     status = 'processing',
                     started_at = NOW(),
                     completed_at = NULL,
-                    error_message = NULL
+                    error_message = NULL,
+                    attempt_count =
+                        attempt_count + 1,
+                    claimed_at = NOW(),
+                    claimed_by = %s,
+                    heartbeat_at = NOW(),
+                    next_attempt_at = NULL
                 WHERE id = %s;
                 """,
                 (
+                    worker_id,
                     coverage_run[
                         "id"
                     ],
                 ),
             )
+
+            if cursor.rowcount != 1:
+                raise RuntimeError(
+                    "NTIA ITM coverage run could not be marked processing."
+                )
 
             return coverage_run
 
@@ -911,29 +966,107 @@ def fail_itm_run(
     *,
     run_id: Any,
     error_message: str,
-) -> None:
-    """Mark an ITM run failed while preserving its failure reason."""
+) -> dict[str, Any]:
+    """Schedule an ITM retry or mark terminal failure.
 
-    with connection.cursor() as cursor:
+    Runs with remaining attempts return to pending after a fixed
+    retry delay. Runs that have exhausted max_attempts become failed.
+    """
+
+    with connection.cursor(
+        row_factory=dict_row
+    ) as cursor:
         cursor.execute(
             """
             UPDATE coverage_runs
             SET
-                status = 'failed',
-                completed_at = NOW(),
+                status =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN 'pending'
+                        ELSE 'failed'
+                    END,
+
+                completed_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE NOW()
+                    END,
+
+                next_attempt_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NOW()
+                                + (
+                                    %s
+                                    * INTERVAL '1 second'
+                                )
+                        ELSE NULL
+                    END,
+
+                started_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE started_at
+                    END,
+
+                claimed_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE claimed_at
+                    END,
+
+                claimed_by =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE claimed_by
+                    END,
+
+                heartbeat_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE heartbeat_at
+                    END,
+
+                last_error_at = NOW(),
                 error_message = %s
-            WHERE id = %s;
+
+            WHERE id = %s
+
+            RETURNING
+                status,
+                attempt_count,
+                max_attempts,
+                next_attempt_at;
             """,
             (
-                error_message[
+                RETRY_DELAY_SECONDS,
+                str(
+                    error_message
+                )[
                     :2000
                 ],
                 run_id,
             ),
         )
 
+        result = cursor.fetchone()
+
+        if result is None:
+            raise RuntimeError(
+                "NTIA ITM failure state could not be updated."
+            )
+
     connection.commit()
 
+    return dict(
+        result
+    )
 
 def process_one_itm_run() -> bool:
     """Claim and process one pending NTIA ITM coverage run."""
@@ -1304,21 +1437,50 @@ def process_one_itm_run() -> bool:
             return True
 
         except Exception as exc:
-            fail_itm_run(
-                connection,
-                run_id=run_id,
-                error_message=str(
-                    exc
-                ),
+            try:
+                connection.rollback()
+            except Exception:
+                pass
+
+            failure_result = (
+                fail_itm_run(
+                    connection,
+                    run_id=run_id,
+                    error_message=str(
+                        exc
+                    ),
+                )
             )
 
-            print(
-                f"NTIA ITM coverage run {run_id} "
-                f"failed: {exc}",
-                file=sys.stderr,
-            )
+            if (
+                failure_result[
+                    "status"
+                ]
+                == "pending"
+            ):
+                print(
+                    f"NTIA ITM coverage run {run_id} "
+                    f"attempt "
+                    f"{failure_result['attempt_count']} "
+                    f"failed: {exc}",
+                    file=sys.stderr,
+                )
 
-            raise
+                print(
+                    "Retry scheduled for "
+                    f"{failure_result['next_attempt_at']}."
+                )
+            else:
+                print(
+                    f"NTIA ITM coverage run {run_id} "
+                    f"failed after "
+                    f"{failure_result['attempt_count']} "
+                    f"attempts: {exc}",
+                    file=sys.stderr,
+                )
+
+            return True
+
 
 if __name__ == "__main__":
     process_one_itm_run()

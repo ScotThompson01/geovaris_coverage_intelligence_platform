@@ -304,7 +304,14 @@ class RapidWorkerTests(
             cursor
         )
 
-        fail_rapid_run(
+        cursor.fetchone.return_value = {
+            "status": "pending",
+            "attempt_count": 1,
+            "max_attempts": 3,
+            "next_attempt_at": "retry-time",
+        }
+
+        result = fail_rapid_run(
             connection,
             run_id="run-123",
             error_message="test failure",
@@ -329,7 +336,37 @@ class RapidWorkerTests(
         )
 
         self.assertIn(
-            "status = 'failed'",
+            "WHEN attempt_count < max_attempts",
+            sql_text,
+        )
+
+        self.assertIn(
+            "THEN 'pending'",
+            sql_text,
+        )
+
+        self.assertIn(
+            "ELSE 'failed'",
+            sql_text,
+        )
+
+        self.assertIn(
+            "next_attempt_at",
+            sql_text,
+        )
+
+        self.assertIn(
+            "last_error_at = NOW()",
+            sql_text,
+        )
+
+        self.assertIn(
+            "claimed_by",
+            sql_text,
+        )
+
+        self.assertIn(
+            "heartbeat_at",
             sql_text,
         )
 
@@ -337,14 +374,35 @@ class RapidWorkerTests(
             params[
                 0
             ],
-            "test failure",
+            30,
         )
 
         self.assertEqual(
             params[
                 1
             ],
+            "test failure",
+        )
+
+        self.assertEqual(
+            params[
+                2
+            ],
             "run-123",
+        )
+
+        self.assertEqual(
+            result[
+                "status"
+            ],
+            "pending",
+        )
+
+        self.assertEqual(
+            result[
+                "attempt_count"
+            ],
+            1,
         )
 
         connection.commit.assert_called_once()
@@ -352,4 +410,3 @@ class RapidWorkerTests(
 
 if __name__ == "__main__":
     unittest.main()
-    

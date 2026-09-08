@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from geovaris_rf.itm_worker import (
     P2108_CLUTTER_MODEL,
@@ -11,6 +11,7 @@ from geovaris_rf.itm_worker import (
     _read_geojson_geometry,
     _run_uses_clutter,
     _validate_clutter_configuration,
+    fail_itm_run,
     get_requested_run_id,
 )
 
@@ -413,15 +414,125 @@ class TestCoverageGeoJsonGeometry(unittest.TestCase):
         )
 
 
+class TestItmRetryFailure(unittest.TestCase):
+    def test_fail_itm_run_schedules_retry(
+        self,
+    ) -> None:
+        connection = MagicMock()
+        cursor = MagicMock()
+
+        connection.cursor.return_value.__enter__.return_value = (
+            cursor
+        )
+
+        cursor.fetchone.return_value = {
+            "status": "pending",
+            "attempt_count": 1,
+            "max_attempts": 3,
+            "next_attempt_at": "retry-time",
+        }
+
+        result = fail_itm_run(
+            connection,
+            run_id="run-123",
+            error_message="test failure",
+        )
+
+        cursor.execute.assert_called_once()
+
+        sql_text = (
+            cursor.execute.call_args[
+                0
+            ][
+                0
+            ]
+        )
+
+        params = (
+            cursor.execute.call_args[
+                0
+            ][
+                1
+            ]
+        )
+
+        self.assertIn(
+            "WHEN attempt_count < max_attempts",
+            sql_text,
+        )
+
+        self.assertIn(
+            "THEN 'pending'",
+            sql_text,
+        )
+
+        self.assertIn(
+            "ELSE 'failed'",
+            sql_text,
+        )
+
+        self.assertIn(
+            "next_attempt_at",
+            sql_text,
+        )
+
+        self.assertIn(
+            "last_error_at = NOW()",
+            sql_text,
+        )
+
+        self.assertIn(
+            "claimed_by",
+            sql_text,
+        )
+
+        self.assertIn(
+            "heartbeat_at",
+            sql_text,
+        )
+
+        self.assertEqual(
+            params[
+                0
+            ],
+            30,
+        )
+
+        self.assertEqual(
+            params[
+                1
+            ],
+            "test failure",
+        )
+
+        self.assertEqual(
+            params[
+                2
+            ],
+            "run-123",
+        )
+
+        self.assertEqual(
+            result[
+                "status"
+            ],
+            "pending",
+        )
+
+        self.assertEqual(
+            result[
+                "attempt_count"
+            ],
+            1,
+        )
+
+        connection.commit.assert_called_once()
+
+
 class TestIdleItmWorkerPolling(unittest.TestCase):
     def test_no_pending_itm_run_does_not_require_dem(
         self,
     ) -> None:
-        from unittest.mock import (
-            MagicMock,
-            patch,
-        )
-
         from geovaris_rf.itm_worker import (
             process_one_itm_run,
         )
