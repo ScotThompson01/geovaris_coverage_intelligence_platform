@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import math
 import os
+import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,8 @@ OUTPUT_ROOT_ENVIRONMENT_VARIABLE = (
 RUN_ID_ENVIRONMENT_VARIABLE = (
     "GEOVARIS_COVERAGE_RUN_ID"
 )
+
+RETRY_DELAY_SECONDS = 30
 
 DEFAULT_OUTPUT_ROOT = Path(
     "rf-engine/data/coverage"
@@ -154,6 +157,28 @@ def get_requested_run_id() -> str | None:
     value = value.strip()
 
     return value or None
+
+
+def get_worker_id() -> str:
+    """Return the identifier recorded when this worker claims work.
+
+    GEOVARIS_WORKER_ID may be configured explicitly in deployed
+    environments. Development workers fall back to hostname + PID.
+    """
+
+    configured_worker_id = (
+        os.getenv(
+            "GEOVARIS_WORKER_ID",
+            "",
+        ).strip()
+    )
+
+    if configured_worker_id:
+        return configured_worker_id
+
+    return (
+        f"{socket.gethostname()}:{os.getpid()}"
+    )
 
 
 def _resolve_required_file(
@@ -251,17 +276,23 @@ def get_output_root() -> Path:
 def claim_pending_rapid_run(
     connection: psycopg.Connection,
 ) -> dict[str, Any] | None:
-    """Claim one pending Rapid Coverage run.
+    """Claim one eligible pending Rapid Coverage run.
 
     When GEOVARIS_COVERAGE_RUN_ID is configured, only that pending
-    Rapid Coverage run is eligible. Otherwise the oldest pending
-    Rapid Coverage run is claimed.
+    Rapid Coverage run is eligible. Otherwise the oldest eligible
+    pending Rapid Coverage run is claimed.
 
-    Row locking prevents two workers from claiming the same run.
+    The database row is locked while the claim metadata and status
+    transition are written so concurrent workers cannot claim the
+    same coverage run.
     """
 
     requested_run_id = (
         get_requested_run_id()
+    )
+
+    worker_id = (
+        get_worker_id()
     )
 
     select_columns = """
@@ -326,6 +357,11 @@ def claim_pending_rapid_run(
 
                     WHERE status = 'pending'
                       AND propagation_model = %s
+                      AND attempt_count < max_attempts
+                      AND (
+                          next_attempt_at IS NULL
+                          OR next_attempt_at <= NOW()
+                      )
 
                     ORDER BY created_at
 
@@ -348,6 +384,11 @@ def claim_pending_rapid_run(
                     WHERE id = %s
                       AND status = 'pending'
                       AND propagation_model = %s
+                      AND attempt_count < max_attempts
+                      AND (
+                          next_attempt_at IS NULL
+                          OR next_attempt_at <= NOW()
+                      )
 
                     FOR UPDATE SKIP LOCKED
 
@@ -373,10 +414,17 @@ def claim_pending_rapid_run(
                     status = 'processing',
                     started_at = NOW(),
                     completed_at = NULL,
-                    error_message = NULL
+                    error_message = NULL,
+                    attempt_count =
+                        attempt_count + 1,
+                    claimed_at = NOW(),
+                    claimed_by = %s,
+                    heartbeat_at = NOW(),
+                    next_attempt_at = NULL
                 WHERE id = %s;
                 """,
                 (
+                    worker_id,
                     coverage_run[
                         "id"
                     ],
@@ -821,20 +869,86 @@ def fail_rapid_run(
     *,
     run_id: Any,
     error_message: str,
-) -> None:
-    """Mark a Rapid Coverage run failed."""
+) -> dict[str, Any]:
+    """Schedule a Rapid Coverage retry or mark terminal failure.
 
-    with connection.cursor() as cursor:
+    Runs with remaining attempts return to pending after a fixed
+    retry delay. Runs that have exhausted max_attempts become failed.
+    """
+
+    with connection.cursor(
+        row_factory=dict_row
+    ) as cursor:
         cursor.execute(
             """
             UPDATE coverage_runs
             SET
-                status = 'failed',
-                completed_at = NOW(),
+                status =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN 'pending'
+                        ELSE 'failed'
+                    END,
+
+                completed_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE NOW()
+                    END,
+
+                next_attempt_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NOW()
+                                + (
+                                    %s
+                                    * INTERVAL '1 second'
+                                )
+                        ELSE NULL
+                    END,
+
+                started_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE started_at
+                    END,
+
+                claimed_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE claimed_at
+                    END,
+
+                claimed_by =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE claimed_by
+                    END,
+
+                heartbeat_at =
+                    CASE
+                        WHEN attempt_count < max_attempts
+                            THEN NULL
+                        ELSE heartbeat_at
+                    END,
+
+                last_error_at = NOW(),
                 error_message = %s
-            WHERE id = %s;
+
+            WHERE id = %s
+
+            RETURNING
+                status,
+                attempt_count,
+                max_attempts,
+                next_attempt_at;
             """,
             (
+                RETRY_DELAY_SECONDS,
                 str(
                     error_message
                 )[
@@ -844,8 +958,18 @@ def fail_rapid_run(
             ),
         )
 
+        result = cursor.fetchone()
+
+        if result is None:
+            raise RuntimeError(
+                "Rapid Coverage failure state could not be updated."
+            )
+
     connection.commit()
 
+    return dict(
+        result
+    )
 
 def process_one_rapid_run() -> bool:
     """Claim and process one pending Rapid Coverage run."""
@@ -1224,24 +1348,42 @@ def process_one_rapid_run() -> bool:
             except Exception:
                 pass
 
-            fail_rapid_run(
-                connection,
-                run_id=run_id,
-                error_message=str(
-                    exc
-                ),
+            failure_result = (
+                fail_rapid_run(
+                    connection,
+                    run_id=run_id,
+                    error_message=str(
+                        exc
+                    ),
+                )
             )
 
-            print(
-                "Rapid Coverage run failed: "
-                f"{run_id}"
-            )
+            if (
+                failure_result[
+                    "status"
+                ]
+                == "pending"
+            ):
+                print(
+                    "Rapid Coverage run "
+                    f"{run_id} attempt "
+                    f"{failure_result['attempt_count']} "
+                    f"failed: {exc}"
+                )
 
-            print(
-                f"Error: {exc}"
-            )
+                print(
+                    "Retry scheduled for "
+                    f"{failure_result['next_attempt_at']}."
+                )
+            else:
+                print(
+                    "Rapid Coverage run "
+                    f"{run_id} failed after "
+                    f"{failure_result['attempt_count']} "
+                    f"attempts: {exc}"
+                )
 
-            raise
+            return True
 
 
 def main() -> int:
