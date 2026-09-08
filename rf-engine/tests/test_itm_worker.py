@@ -13,6 +13,7 @@ from geovaris_rf.itm_worker import (
     _validate_clutter_configuration,
     fail_itm_run,
     get_requested_run_id,
+    refresh_itm_heartbeat,
 )
 
 
@@ -412,6 +413,62 @@ class TestCoverageGeoJsonGeometry(unittest.TestCase):
                 third_polygon,
             ],
         )
+
+
+class TestItmHeartbeat(unittest.TestCase):
+    def test_refresh_itm_heartbeat_updates_processing_run(
+        self,
+    ) -> None:
+        connection = MagicMock()
+        cursor = MagicMock()
+
+        connection.cursor.return_value.__enter__.return_value = (
+            cursor
+        )
+
+        cursor.rowcount = 1
+
+        refresh_itm_heartbeat(
+            connection,
+            run_id="run-123",
+        )
+
+        cursor.execute.assert_called_once()
+
+        sql_text = (
+            cursor.execute.call_args[
+                0
+            ][
+                0
+            ]
+        )
+
+        params = (
+            cursor.execute.call_args[
+                0
+            ][
+                1
+            ]
+        )
+
+        self.assertIn(
+            "heartbeat_at = NOW()",
+            sql_text,
+        )
+
+        self.assertIn(
+            "status = 'processing'",
+            sql_text,
+        )
+
+        self.assertEqual(
+            params,
+            (
+                "run-123",
+            ),
+        )
+
+        connection.commit.assert_called_once()
 
 
 class TestItmRetryFailure(unittest.TestCase):

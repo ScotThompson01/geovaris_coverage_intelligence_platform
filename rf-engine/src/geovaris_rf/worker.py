@@ -18,6 +18,9 @@ import psycopg
 from psycopg.rows import dict_row
 
 from geovaris_rf.free_space import estimated_coverage_radius_m
+from geovaris_rf.queue_heartbeat import (
+    CoverageRunHeartbeat,
+)
 
 
 RUN_ID_ENVIRONMENT_VARIABLE = (
@@ -197,6 +200,40 @@ def claim_pending_run(
             return coverage_run
 
 
+def refresh_heartbeat(
+    connection: psycopg.Connection,
+    *,
+    run_id: Any,
+) -> None:
+    """Refresh the heartbeat for one actively processing free-space run.
+
+    The update is limited to rows that remain in the processing state
+    so a late heartbeat cannot modify a completed, failed, or retried run.
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE coverage_runs
+            SET
+                heartbeat_at = NOW()
+            WHERE id = %s
+              AND status = 'processing';
+            """,
+            (
+                run_id,
+            ),
+        )
+
+        if cursor.rowcount != 1:
+            raise RuntimeError(
+                "Free-space coverage run heartbeat could not be refreshed."
+            )
+
+    connection.commit()
+
+
+
 def complete_run(
     connection: psycopg.Connection,
     coverage_run: dict[str, Any],
@@ -363,6 +400,7 @@ def fail_run(
         result
     )
 
+
 def process_one_run() -> bool:
     """Claim and process one pending development coverage run."""
 
@@ -402,38 +440,47 @@ def process_one_run() -> bool:
         started = time.perf_counter()
 
         try:
-            estimated_radius_m = estimated_coverage_radius_m(
-                frequency_mhz=float(
-                    coverage_run["frequency_mhz"]
-                ),
-                eirp_watts=float(
-                    coverage_run["eirp_watts"]
-                ),
-                receiver_threshold_dbm=float(
-                    coverage_run["receiver_threshold_dbm"]
-                ),
-                calculation_radius_m=float(
-                    coverage_run["calculation_radius_m"]
-                ),
-            )
+            with CoverageRunHeartbeat(
+                database_url=database_url,
+                run_id=run_id,
+            ):
+                estimated_radius_m = estimated_coverage_radius_m(
+                    frequency_mhz=float(
+                        coverage_run["frequency_mhz"]
+                    ),
+                    eirp_watts=float(
+                        coverage_run["eirp_watts"]
+                    ),
+                    receiver_threshold_dbm=float(
+                        coverage_run["receiver_threshold_dbm"]
+                    ),
+                    calculation_radius_m=float(
+                        coverage_run["calculation_radius_m"]
+                    ),
+                )
 
-            processing_time_seconds = (
-                time.perf_counter() - started
-            )
+                refresh_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
 
-            complete_run(
-                connection=connection,
-                coverage_run=coverage_run,
-                estimated_radius_m=estimated_radius_m,
-                processing_time_seconds=processing_time_seconds,
-            )
+                processing_time_seconds = (
+                    time.perf_counter() - started
+                )
 
-            print(
-                f"Completed run {run_id}: "
-                f"{estimated_radius_m:.2f} m radius"
-            )
+                complete_run(
+                    connection=connection,
+                    coverage_run=coverage_run,
+                    estimated_radius_m=estimated_radius_m,
+                    processing_time_seconds=processing_time_seconds,
+                )
 
-            return True
+                print(
+                    f"Completed run {run_id}: "
+                    f"{estimated_radius_m:.2f} m radius"
+                )
+
+                return True
 
         except Exception as exc:
             failure_result = fail_run(

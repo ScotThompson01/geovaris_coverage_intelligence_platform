@@ -60,6 +60,9 @@ from geovaris_rf.itm_model import (
     ItmModel,
     default_local_itm_dll_path,
 )
+from geovaris_rf.queue_heartbeat import (
+    CoverageRunHeartbeat,
+)
 from geovaris_rf.storage import (
     LocalCoverageStorage,
 )
@@ -538,6 +541,40 @@ def claim_pending_itm_run(
                 )
 
             return coverage_run
+
+
+def refresh_itm_heartbeat(
+    connection: psycopg.Connection,
+    *,
+    run_id: Any,
+) -> None:
+    """Refresh the heartbeat for one actively processing ITM run.
+
+    The update is limited to rows that remain in the processing state
+    so a late heartbeat cannot modify a completed, failed, or retried run.
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE coverage_runs
+            SET
+                heartbeat_at = NOW()
+            WHERE id = %s
+              AND status = 'processing';
+            """,
+            (
+                run_id,
+            ),
+        )
+
+        if cursor.rowcount != 1:
+            raise RuntimeError(
+                "NTIA ITM heartbeat could not be refreshed."
+            )
+
+    connection.commit()
+
 
 
 def _validate_run(
@@ -1068,6 +1105,7 @@ def fail_itm_run(
         result
     )
 
+
 def process_one_itm_run() -> bool:
     """Claim and process one pending NTIA ITM coverage run."""
 
@@ -1123,318 +1161,357 @@ def process_one_itm_run() -> bool:
         )
 
         try:
-            # Resolve ITM-specific resources only after an
-            # actual ITM run has been claimed.
-            #
-            # This allows the continuous multi-model worker
-            # to poll for ITM work without requiring ITM DEM
-            # configuration when no ITM job exists.
-            dem_raster_path = (
-                get_dem_raster_path()
-            )
-
-            output_root = (
-                get_output_root()
-            )
-
-            _validate_run(
-                coverage_run
-            )
-
-            clutter_raster_path: Path | None = None
-
-            if _run_uses_clutter(
-                coverage_run
+            with CoverageRunHeartbeat(
+                database_url=database_url,
+                run_id=run_id,
             ):
-                clutter_raster_path = (
-                    get_clutter_raster_path()
+                # Resolve ITM-specific resources only after an
+                # actual ITM run has been claimed.
+                #
+                # This allows the continuous multi-model worker
+                # to poll for ITM work without requiring ITM DEM
+                # configuration when no ITM job exists.
+                dem_raster_path = (
+                    get_dem_raster_path()
                 )
 
-            terrain_sample_spacing_m = (
-                _terrain_sample_spacing_m(
-                    dem_raster_path
+                output_root = (
+                    get_output_root()
                 )
-            )
 
-            configuration = (
-                _build_itm_configuration(
+                _validate_run(
                     coverage_run
                 )
-            )
 
-            model = ItmModel(
-                dll_path=(
-                    default_local_itm_dll_path()
-                ),
-                configuration=configuration,
-                model_version=MODEL_VERSION,
-            )
-
-            grid = (
-                plan_coverage_grid(
-                    site_latitude=float(
-                        coverage_run[
-                            "site_latitude"
-                        ]
-                    ),
-                    site_longitude=float(
-                        coverage_run[
-                            "site_longitude"
-                        ]
-                    ),
-                    radius_m=float(
-                        coverage_run[
-                            "calculation_radius_m"
-                        ]
-                    ),
-                    resolution_m=float(
-                        coverage_run[
-                            "resolution_m"
-                        ]
-                    ),
-                )
-            )
-
-            propagation_cell_count = sum(
-                1
-                for point in grid.points
-                if (
-                    point.inside_radius
-                    and point.distance_from_site_m
-                    > 0.0
-                )
-            )
-
-            if propagation_cell_count <= 0:
-                raise ValueError(
-                    "Coverage grid contains no propagation cells."
-                )
-
-            eirp_dbm = (
-                _watts_to_dbm(
-                    float(
-                        coverage_run[
-                            "eirp_watts"
-                        ]
-                    )
-                )
-            )
-
-            clutter_percentage_locations = (
-                None
-            )
-
-            if _run_uses_clutter(
-                coverage_run
-            ):
-                clutter_percentage_locations = float(
-                    coverage_run[
-                        "clutter_percentage_locations"
-                    ]
-                )
-
-            calculation_kwargs: dict[
-                str,
-                Any,
-            ] = {
-                "model": model,
-                "grid": grid,
-                "dem_raster_path": str(
-                    dem_raster_path
-                ),
-                "frequency_mhz": float(
-                    coverage_run[
-                        "frequency_mhz"
-                    ]
-                ),
-                "transmitter_height_agl_m": float(
-                    coverage_run[
-                        "antenna_height_m"
-                    ]
-                ),
-                "receiver_height_agl_m": float(
-                    coverage_run[
-                        "receiver_height_m"
-                    ]
-                ),
-                "terrain_sample_spacing_m": (
-                    terrain_sample_spacing_m
-                ),
-                "eirp_dbm": eirp_dbm,
-
-                # EIRP already includes transmitter gain.
-                "receiver_gain_dbi": 0.0,
-
-                # No separate system-loss field exists in the
-                # current scenario contract.
-                "additional_losses_db": 0.0,
-
-                "receiver_threshold_dbm": float(
-                    coverage_run[
-                        "receiver_threshold_dbm"
-                    ]
-                ),
-                "max_propagation_cells": (
-                    propagation_cell_count
-                ),
-            }
-
-            if clutter_raster_path is not None:
-                calculation_kwargs[
-                    "clutter_raster_path"
-                ] = str(
-                    clutter_raster_path
-                )
-
-                calculation_kwargs[
-                    "clutter_percentage_locations"
-                ] = (
-                    clutter_percentage_locations
-                )
-
-            calculation = (
-                calculate_coverage_subset(
-                    **calculation_kwargs
-                )
-            )
-
-            artifacts = (
-                build_coverage_artifact_paths(
-                    output_root=output_root,
+                refresh_itm_heartbeat(
+                    connection,
                     run_id=run_id,
                 )
-            )
 
-            artifacts.raster_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
+                clutter_raster_path: Path | None = None
 
-            raster_path = (
-                artifacts.raster_path
-            )
+                if _run_uses_clutter(
+                    coverage_run
+                ):
+                    clutter_raster_path = (
+                        get_clutter_raster_path()
+                    )
 
-            geojson_path = (
-                artifacts.geojson_path
-            )
-
-            write_coverage_geotiff(
-                grid=grid,
-                calculation=calculation,
-                output_path=str(
-                    raster_path
-                ),
-            )
-
-            coverage_raster_to_geojson(
-                raster_path=str(
-                    raster_path
-                ),
-                output_path=str(
-                    geojson_path
-                ),
-            )
-
-            coverage_geometry = (
-                _read_geojson_geometry(
-                    geojson_path
+                terrain_sample_spacing_m = (
+                    _terrain_sample_spacing_m(
+                        dem_raster_path
+                    )
                 )
-            )
 
-            storage = (
-                LocalCoverageStorage()
-            )
+                refresh_itm_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
 
-            coverage_raster_uri = (
-                storage.publish(
-                    local_path=raster_path,
-                    artifact_key=(
-                        artifacts.raster_key
+                configuration = (
+                    _build_itm_configuration(
+                        coverage_run
+                    )
+                )
+
+                model = ItmModel(
+                    dll_path=(
+                        default_local_itm_dll_path()
+                    ),
+                    configuration=configuration,
+                    model_version=MODEL_VERSION,
+                )
+
+                grid = (
+                    plan_coverage_grid(
+                        site_latitude=float(
+                            coverage_run[
+                                "site_latitude"
+                            ]
+                        ),
+                        site_longitude=float(
+                            coverage_run[
+                                "site_longitude"
+                            ]
+                        ),
+                        radius_m=float(
+                            coverage_run[
+                                "calculation_radius_m"
+                            ]
+                        ),
+                        resolution_m=float(
+                            coverage_run[
+                                "resolution_m"
+                            ]
+                        ),
+                    )
+                )
+
+                refresh_itm_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                propagation_cell_count = sum(
+                    1
+                    for point in grid.points
+                    if (
+                        point.inside_radius
+                        and point.distance_from_site_m
+                        > 0.0
+                    )
+                )
+
+                if propagation_cell_count <= 0:
+                    raise ValueError(
+                        "Coverage grid contains no propagation cells."
+                    )
+
+                eirp_dbm = (
+                    _watts_to_dbm(
+                        float(
+                            coverage_run[
+                                "eirp_watts"
+                            ]
+                        )
+                    )
+                )
+
+                clutter_percentage_locations = (
+                    None
+                )
+
+                if _run_uses_clutter(
+                    coverage_run
+                ):
+                    clutter_percentage_locations = float(
+                        coverage_run[
+                            "clutter_percentage_locations"
+                        ]
+                    )
+
+                calculation_kwargs: dict[
+                    str,
+                    Any,
+                ] = {
+                    "model": model,
+                    "grid": grid,
+                    "dem_raster_path": str(
+                        dem_raster_path
+                    ),
+                    "frequency_mhz": float(
+                        coverage_run[
+                            "frequency_mhz"
+                        ]
+                    ),
+                    "transmitter_height_agl_m": float(
+                        coverage_run[
+                            "antenna_height_m"
+                        ]
+                    ),
+                    "receiver_height_agl_m": float(
+                        coverage_run[
+                            "receiver_height_m"
+                        ]
+                    ),
+                    "terrain_sample_spacing_m": (
+                        terrain_sample_spacing_m
+                    ),
+                    "eirp_dbm": eirp_dbm,
+
+                    # EIRP already includes transmitter gain.
+                    "receiver_gain_dbi": 0.0,
+
+                    # No separate system-loss field exists in the
+                    # current scenario contract.
+                    "additional_losses_db": 0.0,
+
+                    "receiver_threshold_dbm": float(
+                        coverage_run[
+                            "receiver_threshold_dbm"
+                        ]
+                    ),
+                    "max_propagation_cells": (
+                        propagation_cell_count
+                    ),
+                }
+
+                if clutter_raster_path is not None:
+                    calculation_kwargs[
+                        "clutter_raster_path"
+                    ] = str(
+                        clutter_raster_path
+                    )
+
+                    calculation_kwargs[
+                        "clutter_percentage_locations"
+                    ] = (
+                        clutter_percentage_locations
+                    )
+
+                calculation = (
+                    calculate_coverage_subset(
+                        **calculation_kwargs
+                    )
+                )
+
+                refresh_itm_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                artifacts = (
+                    build_coverage_artifact_paths(
+                        output_root=output_root,
+                        run_id=run_id,
+                    )
+                )
+
+                artifacts.raster_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+
+                raster_path = (
+                    artifacts.raster_path
+                )
+
+                geojson_path = (
+                    artifacts.geojson_path
+                )
+
+                write_coverage_geotiff(
+                    grid=grid,
+                    calculation=calculation,
+                    output_path=str(
+                        raster_path
                     ),
                 )
-            )
 
-            storage.publish(
-                local_path=geojson_path,
-                artifact_key=(
-                    artifacts.geojson_key
-                ),
-            )
+                refresh_itm_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
 
-            processing_time_seconds = (
-                time.perf_counter()
-                - started
-            )
+                coverage_raster_to_geojson(
+                    raster_path=str(
+                        raster_path
+                    ),
+                    output_path=str(
+                        geojson_path
+                    ),
+                )
 
-            complete_itm_run(
-                connection,
-                run_id=run_id,
-                coverage_raster_uri=(
-                    coverage_raster_uri
-                ),
-                coverage_geometry=(
-                    coverage_geometry
-                ),
-                processing_time_seconds=(
-                    processing_time_seconds
-                ),
-            )
+                refresh_itm_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
 
-            print(
-                f"Completed NTIA ITM run {run_id}"
-            )
+                coverage_geometry = (
+                    _read_geojson_geometry(
+                        geojson_path
+                    )
+                )
 
-            print(
-                f"Grid: {grid.width} x {grid.height}"
-            )
+                storage = (
+                    LocalCoverageStorage()
+                )
 
-            print(
-                "Propagation cells: "
-                f"{propagation_cell_count}"
-            )
+                coverage_raster_uri = (
+                    storage.publish(
+                        local_path=raster_path,
+                        artifact_key=(
+                            artifacts.raster_key
+                        ),
+                    )
+                )
 
-            print(
-                "Terrain sample spacing: "
-                f"{terrain_sample_spacing_m:.2f} m"
-            )
+                storage.publish(
+                    local_path=geojson_path,
+                    artifact_key=(
+                        artifacts.geojson_key
+                    ),
+                )
 
-            if clutter_raster_path is not None:
-                print(
-                    "Clutter dataset: "
-                    f"{coverage_run['clutter_source']} "
-                    f"{coverage_run['clutter_version']}"
+                refresh_itm_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                processing_time_seconds = (
+                    time.perf_counter()
+                    - started
+                )
+
+                complete_itm_run(
+                    connection,
+                    run_id=run_id,
+                    coverage_raster_uri=(
+                        coverage_raster_uri
+                    ),
+                    coverage_geometry=(
+                        coverage_geometry
+                    ),
+                    processing_time_seconds=(
+                        processing_time_seconds
+                    ),
                 )
 
                 print(
-                    "Clutter model: "
-                    f"{coverage_run['clutter_model']} "
-                    f"{coverage_run['clutter_model_version']}"
+                    f"Completed NTIA ITM run {run_id}"
                 )
 
                 print(
-                    "Clutter percentage locations: "
-                    f"{clutter_percentage_locations:.2f}"
+                    f"Grid: {grid.width} x {grid.height}"
                 )
 
                 print(
-                    "Clutter correction end: "
-                    f"{coverage_run['clutter_correction_end']}"
+                    "Propagation cells: "
+                    f"{propagation_cell_count}"
                 )
 
-            print(
-                f"GeoTIFF: {raster_path.resolve()}"
-            )
+                print(
+                    "Terrain sample spacing: "
+                    f"{terrain_sample_spacing_m:.2f} m"
+                )
 
-            print(
-                f"GeoJSON: {geojson_path.resolve()}"
-            )
+                if clutter_raster_path is not None:
+                    print(
+                        "Clutter dataset: "
+                        f"{coverage_run['clutter_source']} "
+                        f"{coverage_run['clutter_version']}"
+                    )
 
-            print(
-                "Processing time: "
-                f"{processing_time_seconds:.2f} s"
-            )
+                    print(
+                        "Clutter model: "
+                        f"{coverage_run['clutter_model']} "
+                        f"{coverage_run['clutter_model_version']}"
+                    )
 
-            return True
+                    print(
+                        "Clutter percentage locations: "
+                        f"{clutter_percentage_locations:.2f}"
+                    )
+
+                    print(
+                        "Clutter correction end: "
+                        f"{coverage_run['clutter_correction_end']}"
+                    )
+
+                print(
+                    f"GeoTIFF: {raster_path.resolve()}"
+                )
+
+                print(
+                    f"GeoJSON: {geojson_path.resolve()}"
+                )
+
+                print(
+                    "Processing time: "
+                    f"{processing_time_seconds:.2f} s"
+                )
+
+                return True
 
         except Exception as exc:
             try:

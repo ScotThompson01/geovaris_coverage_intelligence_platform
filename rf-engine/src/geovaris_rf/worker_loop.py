@@ -26,7 +26,11 @@ from geovaris_rf.rapid_worker import (
     process_one_rapid_run,
 )
 from geovaris_rf.worker import (
+    get_database_url,
     process_one_run,
+)
+from geovaris_rf.queue_recovery import (
+    recover_stale_coverage_runs,
 )
 
 
@@ -58,6 +62,26 @@ def process_one_available_run() -> bool:
     return False
 
 
+def recover_stale_runs() -> None:
+    """Recover stale processing runs before polling for new work."""
+
+    recovered_runs = (
+        recover_stale_coverage_runs(
+            database_url=get_database_url(),
+        )
+    )
+
+    for recovered_run in recovered_runs:
+        print(
+            "Recovered stale coverage run "
+            f"{recovered_run['id']} "
+            f"({recovered_run['propagation_model']}) "
+            f"to status "
+            f"{recovered_run['status']}."
+        )
+
+
+
 def run_worker_loop() -> None:
     """Continuously process supported pending RF coverage runs."""
 
@@ -81,6 +105,8 @@ def run_worker_loop() -> None:
 
     try:
         while True:
+            recover_stale_runs()
+
             processed_run = (
                 process_one_available_run()
             )
