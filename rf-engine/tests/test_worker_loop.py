@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from geovaris_rf.worker_loop import (
     process_one_available_run,
+    recover_stale_runs,
 )
 
 
@@ -111,6 +112,83 @@ class WorkerLoopTests(unittest.TestCase):
         mock_rapid.assert_called_once_with()
         mock_itm.assert_called_once_with()
         mock_free_space.assert_called_once_with()
+
+
+class WorkerLoopRecoveryTests(unittest.TestCase):
+    @patch(
+        "geovaris_rf.worker_loop.recover_stale_coverage_runs"
+    )
+    @patch(
+        "geovaris_rf.worker_loop.get_database_url"
+    )
+    def test_recover_stale_runs_uses_database_url(
+        self,
+        mock_get_database_url,
+        mock_recover,
+    ):
+        mock_get_database_url.return_value = (
+            "postgresql://test"
+        )
+
+        mock_recover.return_value = []
+
+        recover_stale_runs()
+
+        mock_get_database_url.assert_called_once_with()
+
+        mock_recover.assert_called_once_with(
+            database_url="postgresql://test",
+        )
+
+    @patch(
+        "builtins.print"
+    )
+    @patch(
+        "geovaris_rf.worker_loop.recover_stale_coverage_runs"
+    )
+    @patch(
+        "geovaris_rf.worker_loop.get_database_url"
+    )
+    def test_recovered_runs_are_logged(
+        self,
+        mock_get_database_url,
+        mock_recover,
+        mock_print,
+    ):
+        mock_get_database_url.return_value = (
+            "postgresql://test"
+        )
+
+        mock_recover.return_value = [
+            {
+                "id": "run-123",
+                "propagation_model": "rapid_coverage",
+                "status": "pending",
+            },
+            {
+                "id": "run-456",
+                "propagation_model": "ntia_itm",
+                "status": "failed",
+            },
+        ]
+
+        recover_stale_runs()
+
+        mock_print.assert_any_call(
+            "Recovered stale coverage run "
+            "run-123 "
+            "(rapid_coverage) "
+            "to status "
+            "pending."
+        )
+
+        mock_print.assert_any_call(
+            "Recovered stale coverage run "
+            "run-456 "
+            "(ntia_itm) "
+            "to status "
+            "failed."
+        )
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from geovaris_rf.rapid_worker import (
     _validate_run,
     fail_rapid_run,
     get_requested_run_id,
+    refresh_rapid_heartbeat,
 )
 from geovaris_rf.clutter_height import (
     GEOVARIS_DEFAULT_CLUTTER_HEIGHT_PROFILE_NAME,
@@ -293,6 +294,61 @@ class RapidWorkerTests(
                         "test file"
                     ),
                 )
+
+    def test_refresh_heartbeat_updates_processing_run(
+        self,
+    ) -> None:
+        connection = MagicMock()
+        cursor = MagicMock()
+
+        connection.cursor.return_value.__enter__.return_value = (
+            cursor
+        )
+
+        cursor.rowcount = 1
+
+        refresh_rapid_heartbeat(
+            connection,
+            run_id="run-123",
+        )
+
+        cursor.execute.assert_called_once()
+
+        sql_text = (
+            cursor.execute.call_args[
+                0
+            ][
+                0
+            ]
+        )
+
+        params = (
+            cursor.execute.call_args[
+                0
+            ][
+                1
+            ]
+        )
+
+        self.assertIn(
+            "heartbeat_at = NOW()",
+            sql_text,
+        )
+
+        self.assertIn(
+            "status = 'processing'",
+            sql_text,
+        )
+
+        self.assertEqual(
+            params,
+            (
+                "run-123",
+            ),
+        )
+
+        connection.commit.assert_called_once()
+
 
     def test_fail_run_updates_database(
         self,

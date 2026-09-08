@@ -3,7 +3,66 @@ from unittest.mock import MagicMock
 
 from geovaris_rf.worker import (
     fail_run,
+    refresh_heartbeat,
 )
+
+
+class FreeSpaceWorkerHeartbeatTests(
+    unittest.TestCase
+):
+    def test_refresh_heartbeat_updates_processing_run(
+        self,
+    ) -> None:
+        connection = MagicMock()
+        cursor = MagicMock()
+
+        connection.cursor.return_value.__enter__.return_value = (
+            cursor
+        )
+
+        cursor.rowcount = 1
+
+        refresh_heartbeat(
+            connection,
+            run_id="run-123",
+        )
+
+        cursor.execute.assert_called_once()
+
+        sql_text = (
+            cursor.execute.call_args[
+                0
+            ][
+                0
+            ]
+        )
+
+        params = (
+            cursor.execute.call_args[
+                0
+            ][
+                1
+            ]
+        )
+
+        self.assertIn(
+            "heartbeat_at = NOW()",
+            sql_text,
+        )
+
+        self.assertIn(
+            "status = 'processing'",
+            sql_text,
+        )
+
+        self.assertEqual(
+            params,
+            (
+                "run-123",
+            ),
+        )
+
+        connection.commit.assert_called_once()
 
 
 class FreeSpaceWorkerRetryTests(

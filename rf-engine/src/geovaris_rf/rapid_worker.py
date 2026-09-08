@@ -63,6 +63,9 @@ from geovaris_rf.rapid_run_completion import (
     RAPID_PROPAGATION_MODEL_VERSION,
     complete_rapid_run,
 )
+from geovaris_rf.queue_heartbeat import (
+    CoverageRunHeartbeat,
+)
 from geovaris_rf.storage import (
     LocalCoverageStorage,
 )
@@ -439,6 +442,41 @@ def claim_pending_rapid_run(
             return dict(
                 coverage_run
             )
+
+
+def refresh_rapid_heartbeat(
+    connection: psycopg.Connection,
+    *,
+    run_id: Any,
+) -> None:
+    """Refresh the heartbeat for one actively processing Rapid run.
+
+    The update is intentionally limited to rows that are still in the
+    processing state so a late heartbeat cannot revive or modify a run
+    that has already completed, failed, or returned to pending.
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE coverage_runs
+            SET
+                heartbeat_at = NOW()
+            WHERE id = %s
+              AND status = 'processing';
+            """,
+            (
+                run_id,
+            ),
+        )
+
+        if cursor.rowcount != 1:
+            raise RuntimeError(
+                "Rapid Coverage heartbeat could not be refreshed."
+            )
+
+    connection.commit()
+
 
 
 def snapshot_rapid_dem_lineage(
@@ -971,6 +1009,7 @@ def fail_rapid_run(
         result
     )
 
+
 def process_one_rapid_run() -> bool:
     """Claim and process one pending Rapid Coverage run."""
 
@@ -1037,310 +1076,343 @@ def process_one_rapid_run() -> bool:
         )
 
         try:
-            print(
-                "Snapshotting Rapid DEM lineage..."
-            )
+            with CoverageRunHeartbeat(
+                database_url=database_url,
+                run_id=run_id,
+            ):
+                print(
+                    "Snapshotting Rapid DEM lineage..."
+                )
 
-            snapshot_rapid_dem_lineage(
-                connection,
-                coverage_run=coverage_run,
-            )
+                snapshot_rapid_dem_lineage(
+                    connection,
+                    coverage_run=coverage_run,
+                )
 
-            _validate_run(
-                coverage_run
-            )
-
-            clutter_profile = (
-                build_geovaris_default_clutter_height_profile()
-            )
-
-            artifacts = (
-                build_coverage_artifact_paths(
-                    output_root=output_root,
+                refresh_rapid_heartbeat(
+                    connection,
                     run_id=run_id,
                 )
-            )
 
-            artifacts.raster_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
-
-            raster_path = (
-                artifacts.raster_path
-            )
-
-            geojson_path = (
-                artifacts.geojson_path
-            )
-
-            effective_surface_path = (
-                raster_path.parent
-                / "effective_surface.tif"
-            )
-
-            viewshed_path = (
-                raster_path.parent
-                / "viewshed.tif"
-            )
-
-            print(
-                "Building effective terrain/clutter surface..."
-            )
-
-            build_effective_surface_raster(
-                dem_path=dem_raster_path,
-                clutter_raster_path=(
-                    clutter_raster_path
-                ),
-                destination_path=(
-                    effective_surface_path
-                ),
-                clutter_profile=(
-                    clutter_profile
-                ),
-            )
-
-            print(
-                "Building terrain/clutter viewshed..."
-            )
-
-            build_viewshed_raster(
-                dem_path=dem_raster_path,
-                effective_surface_path=(
-                    effective_surface_path
-                ),
-                destination_path=(
-                    viewshed_path
-                ),
-                observer_latitude=float(
-                    coverage_run[
-                        "site_latitude"
-                    ]
-                ),
-                observer_longitude=float(
-                    coverage_run[
-                        "site_longitude"
-                    ]
-                ),
-                transmitter_height_agl_m=float(
-                    coverage_run[
-                        "antenna_height_m"
-                    ]
-                ),
-                receiver_height_agl_m=float(
-                    coverage_run[
-                        "receiver_height_m"
-                    ]
-                ),
-                calculation_radius_m=float(
-                    coverage_run[
-                        "calculation_radius_m"
-                    ]
-                ),
-            )
-
-            eirp_dbm = watts_to_dbm(
-                float(
-                    coverage_run[
-                        "eirp_watts"
-                    ]
+                _validate_run(
+                    coverage_run
                 )
-            )
 
-            print(
-                "Applying free-space link budget..."
-            )
+                clutter_profile = (
+                    build_geovaris_default_clutter_height_profile()
+                )
 
-            build_rapid_coverage_raster(
-                viewshed_path=(
-                    viewshed_path
-                ),
-                destination_path=(
-                    raster_path
-                ),
-                observer_latitude=float(
-                    coverage_run[
-                        "site_latitude"
-                    ]
-                ),
-                observer_longitude=float(
-                    coverage_run[
-                        "site_longitude"
-                    ]
-                ),
-                frequency_mhz=float(
-                    coverage_run[
-                        "frequency_mhz"
-                    ]
-                ),
-                eirp_dbm=(
-                    eirp_dbm
-                ),
-                receiver_threshold_dbm=float(
-                    coverage_run[
-                        "receiver_threshold_dbm"
-                    ]
-                ),
-                calculation_radius_m=float(
-                    coverage_run[
-                        "calculation_radius_m"
-                    ]
-                ),
+                artifacts = (
+                    build_coverage_artifact_paths(
+                        output_root=output_root,
+                        run_id=run_id,
+                    )
+                )
 
-                # EIRP already includes transmitter gain.
-                receiver_gain_dbi=0.0,
+                artifacts.raster_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
 
-                # Current scenario schema has no separate
-                # additional system-loss field.
-                additional_losses_db=0.0,
-            )
+                raster_path = (
+                    artifacts.raster_path
+                )
 
-            print(
-                "Building display GeoJSON..."
-            )
+                geojson_path = (
+                    artifacts.geojson_path
+                )
 
-            geojson_result = (
-                rapid_coverage_raster_to_geojson(
-                    raster_path=(
+                effective_surface_path = (
+                    raster_path.parent
+                    / "effective_surface.tif"
+                )
+
+                viewshed_path = (
+                    raster_path.parent
+                    / "viewshed.tif"
+                )
+
+                print(
+                    "Building effective terrain/clutter surface..."
+                )
+
+                build_effective_surface_raster(
+                    dem_path=dem_raster_path,
+                    clutter_raster_path=(
+                        clutter_raster_path
+                    ),
+                    destination_path=(
+                        effective_surface_path
+                    ),
+                    clutter_profile=(
+                        clutter_profile
+                    ),
+                )
+
+                refresh_rapid_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                print(
+                    "Building terrain/clutter viewshed..."
+                )
+
+                build_viewshed_raster(
+                    dem_path=dem_raster_path,
+                    effective_surface_path=(
+                        effective_surface_path
+                    ),
+                    destination_path=(
+                        viewshed_path
+                    ),
+                    observer_latitude=float(
+                        coverage_run[
+                            "site_latitude"
+                        ]
+                    ),
+                    observer_longitude=float(
+                        coverage_run[
+                            "site_longitude"
+                        ]
+                    ),
+                    transmitter_height_agl_m=float(
+                        coverage_run[
+                            "antenna_height_m"
+                        ]
+                    ),
+                    receiver_height_agl_m=float(
+                        coverage_run[
+                            "receiver_height_m"
+                        ]
+                    ),
+                    calculation_radius_m=float(
+                        coverage_run[
+                            "calculation_radius_m"
+                        ]
+                    ),
+                )
+
+                refresh_rapid_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                eirp_dbm = watts_to_dbm(
+                    float(
+                        coverage_run[
+                            "eirp_watts"
+                        ]
+                    )
+                )
+
+                print(
+                    "Applying free-space link budget..."
+                )
+
+                build_rapid_coverage_raster(
+                    viewshed_path=(
+                        viewshed_path
+                    ),
+                    destination_path=(
                         raster_path
                     ),
-                    output_path=(
+                    observer_latitude=float(
+                        coverage_run[
+                            "site_latitude"
+                        ]
+                    ),
+                    observer_longitude=float(
+                        coverage_run[
+                            "site_longitude"
+                        ]
+                    ),
+                    frequency_mhz=float(
+                        coverage_run[
+                            "frequency_mhz"
+                        ]
+                    ),
+                    eirp_dbm=(
+                        eirp_dbm
+                    ),
+                    receiver_threshold_dbm=float(
+                        coverage_run[
+                            "receiver_threshold_dbm"
+                        ]
+                    ),
+                    calculation_radius_m=float(
+                        coverage_run[
+                            "calculation_radius_m"
+                        ]
+                    ),
+
+                    # EIRP already includes transmitter gain.
+                    receiver_gain_dbi=0.0,
+
+                    # Current scenario schema has no separate
+                    # additional system-loss field.
+                    additional_losses_db=0.0,
+                )
+
+                refresh_rapid_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                print(
+                    "Building display GeoJSON..."
+                )
+
+                geojson_result = (
+                    rapid_coverage_raster_to_geojson(
+                        raster_path=(
+                            raster_path
+                        ),
+                        output_path=(
+                            geojson_path
+                        ),
+                    )
+                )
+
+                refresh_rapid_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                storage = (
+                    LocalCoverageStorage()
+                )
+
+                coverage_raster_uri = (
+                    storage.publish(
+                        local_path=raster_path,
+                        artifact_key=(
+                            artifacts.raster_key
+                        ),
+                    )
+                )
+
+                storage.publish(
+                    local_path=geojson_path,
+                    artifact_key=(
+                        artifacts.geojson_key
+                    ),
+                )
+
+                refresh_rapid_heartbeat(
+                    connection,
+                    run_id=run_id,
+                )
+
+                print(
+                    "Dissolving display geometry and calculating "
+                    "population and location analytics in PostGIS..."
+                )
+
+                complete_rapid_run(
+                    connection,
+                    run_id=run_id,
+                    coverage_raster_uri=(
+                        coverage_raster_uri
+                    ),
+                    display_geojson_path=(
                         geojson_path
                     ),
-                )
-            )
-
-            storage = (
-                LocalCoverageStorage()
-            )
-
-            coverage_raster_uri = (
-                storage.publish(
-                    local_path=raster_path,
-                    artifact_key=(
-                        artifacts.raster_key
+                    authoritative_coverage_area_sq_m=(
+                        geojson_result
+                        .authoritative_covered_area_m2
+                    ),
+                    processing_started_at=(
+                        started
                     ),
                 )
-            )
 
-            storage.publish(
-                local_path=geojson_path,
-                artifact_key=(
-                    artifacts.geojson_key
-                ),
-            )
+                processing_time_seconds = (
+                    time.perf_counter()
+                    - started
+    )
 
+                print(
+                    "Completed Rapid Coverage run "
+                    f"{run_id}"
+                )
 
-            print(
-                "Dissolving display geometry and calculating "
-                "population and location analytics in PostGIS..."
-            )
+                print(
+                    "Methodology: "
+                    "Terrain/Clutter LOS + "
+                    "Free-Space Link Budget"
+                )
 
-            complete_rapid_run(
-                connection,
-                run_id=run_id,
-                coverage_raster_uri=(
-                    coverage_raster_uri
-                ),
-                display_geojson_path=(
-                    geojson_path
-                ),
-                authoritative_coverage_area_sq_m=(
-                    geojson_result
-                    .authoritative_covered_area_m2
-                ),
-                processing_started_at=(
-                    started
-                ),
-            )
+                print(
+                    "Frequency: "
+                    f"{float(coverage_run['frequency_mhz']):.3f} MHz"
+                )
 
-            processing_time_seconds = (
-                time.perf_counter()
-                - started
-)
+                print(
+                    "EIRP: "
+                    f"{float(coverage_run['eirp_watts']):.3f} W"
+                )
 
-            print(
-                "Completed Rapid Coverage run "
-                f"{run_id}"
-            )
+                print(
+                    "Calculation radius: "
+                    f"{float(coverage_run['calculation_radius_m']):.2f} m"
+                )
 
-            print(
-                "Methodology: "
-                "Terrain/Clutter LOS + "
-                "Free-Space Link Budget"
-            )
+                print(
+                    "Raster resolution: "
+                    f"{float(coverage_run['resolution_m']):.2f} m"
+                )
 
-            print(
-                "Frequency: "
-                f"{float(coverage_run['frequency_mhz']):.3f} MHz"
-            )
+                print(
+                    "Covered cells: "
+                    f"{geojson_result.covered_cell_count:,}"
+                )
 
-            print(
-                "EIRP: "
-                f"{float(coverage_run['eirp_watts']):.3f} W"
-            )
+                print(
+                    "Authoritative area: "
+                    f"{geojson_result.authoritative_covered_area_km2:.3f} km2"
+                )
 
-            print(
-                "Calculation radius: "
-                f"{float(coverage_run['calculation_radius_m']):.2f} m"
-            )
+                print(
+                    "Display features: "
+                    f"{geojson_result.feature_count:,}"
+                )
 
-            print(
-                "Raster resolution: "
-                f"{float(coverage_run['resolution_m']):.2f} m"
-            )
+                print(
+                    "Display retained area: "
+                    f"{geojson_result.display_retained_area_percent:.3f}%"
+                )
 
-            print(
-                "Covered cells: "
-                f"{geojson_result.covered_cell_count:,}"
-            )
+                print(
+                    "Clutter profile: "
+                    f"{clutter_profile.name} "
+                    f"{clutter_profile.version}"
+                )
 
-            print(
-                "Authoritative area: "
-                f"{geojson_result.authoritative_covered_area_km2:.3f} km2"
-            )
+                print(
+                    "DEM lineage: "
+                    f"{coverage_run['dem_source']} / "
+                    f"{coverage_run['dem_version']} / "
+                    f"{coverage_run['dem_horizontal_crs']} / "
+                    f"{coverage_run['dem_vertical_datum']} / "
+                    f"{coverage_run['dem_units']} / "
+                    f"{float(coverage_run['dem_resolution_m']):.0f} m"
+                )
 
-            print(
-                "Display features: "
-                f"{geojson_result.feature_count:,}"
-            )
+                print(
+                    f"GeoTIFF: {raster_path.resolve()}"
+                )
 
-            print(
-                "Display retained area: "
-                f"{geojson_result.display_retained_area_percent:.3f}%"
-            )
+                print(
+                    f"GeoJSON: {geojson_path.resolve()}"
+                )
 
-            print(
-                "Clutter profile: "
-                f"{clutter_profile.name} "
-                f"{clutter_profile.version}"
-            )
+                print(
+                    "Processing time: "
+                    f"{processing_time_seconds:.3f} s"
+                )
 
-            print(
-                "DEM lineage: "
-                f"{coverage_run['dem_source']} / "
-                f"{coverage_run['dem_version']} / "
-                f"{coverage_run['dem_horizontal_crs']} / "
-                f"{coverage_run['dem_vertical_datum']} / "
-                f"{coverage_run['dem_units']} / "
-                f"{float(coverage_run['dem_resolution_m']):.0f} m"
-            )
-
-            print(
-                f"GeoTIFF: {raster_path.resolve()}"
-            )
-
-            print(
-                f"GeoJSON: {geojson_path.resolve()}"
-            )
-
-            print(
-                "Processing time: "
-                f"{processing_time_seconds:.3f} s"
-            )
-
-            return True
+                return True
 
         except Exception as exc:
             try:
